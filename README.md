@@ -75,3 +75,27 @@
     - Range: max-min per axis (3 for acc, 3 for gyro)
     - SMA: signal magnitude area (1 combined feature)
 - Accuracy: 94%
+
+##### Model 2.1
+- Implement basis for real-time feedback with Delsys API. Saves trained models in models/ folder. Trained using Model 1.4 which uses all EMG and IMU sensors and using 1 session of data for testing (20251202-Data)
+- Classes:
+    - (0) Neutral
+    - (1) Pinching
+    - (2) Grasping
+    - (3) Zipping
+- EMG Features (8 per channel):
+    - MAV: mean absolute value
+    - RMS: root mean square
+    - VAR: variance
+    - WL: waveform length
+    - ZC: zero crossings
+    - SSC: slope sign changes
+    - MNF: mean frequency
+    - MDF: median frequency
+- IMU Features (25 per sensor):
+    - Mean: mean value per axis (3 for acc, 3 for gyro)
+    - STD: standard deviation per axis (3 for acc, 3 for gyro)
+    - RMS: root mean square per axis (3 for acc, 3 for gyro)
+    - Range: max-min per axis (3 for acc, 3 for gyro)
+    - SMA: signal magnitude area (1 combined feature)
+- Accuracy: 99%
