@@ -1,0 +1,19 @@
+{
+    "timestamp": "2025-12-06T03:49:04.469319",
+    "model_name": "model_latest",
+    "model_type": "LinearDiscriminantAnalysis",
+    "n_features": 456,
+    "n_classes": 4,
+    "classes": [
+        0,
+        1,
+        2,
+        3
+    ],
+    "class_names": {
+        "0": "Neutral",
+        "1": "Pinching",
+        "2": "Grasping",
+        "3": "Zipping"
+    }
+}
