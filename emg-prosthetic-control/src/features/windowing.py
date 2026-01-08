@@ -1,5 +1,9 @@
-def window_and_extract_features(emg_dict, imu_dict, fs_emg=963, fs_imu=148.148,
-                                 window_sec=0.20, overlap_sec=0.10):
+import numpy as np
+from .emg_features import extract_emg_features
+from .imu_features import extract_imu_features
+
+def window_and_extract_features(emg_dict, imu_dict, fs_emg, fs_imu,
+                                window_sec, overlap_sec):
     """
     Window EMG and IMU data separately (accounting for different sampling rates)
     and extract features from aligned windows.
@@ -36,25 +40,19 @@ def window_and_extract_features(emg_dict, imu_dict, fs_emg=963, fs_imu=148.148,
         for sensor in emg_sensors:
             start = win_idx * emg_step
             end = start + emg_win_size
-            
             if end > len(emg_dict[sensor]):
                 break
-                
             window = emg_dict[sensor][start:end].flatten()
-            
-            feats = extract_emg_features(window)
+            feats = extract_emg_features(window, fs_emg)
             window_features.extend(feats)
         
         # IMU features
         for sensor in imu_sensors:
             start = win_idx * imu_step
             end = start + imu_win_size
-            
             if end > len(imu_dict[sensor]):
                 break
-                
             window = imu_dict[sensor][start:end]
-            
             feats = extract_imu_features(window)
             window_features.extend(feats)
         

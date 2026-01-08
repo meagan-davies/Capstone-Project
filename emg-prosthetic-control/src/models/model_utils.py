@@ -126,7 +126,7 @@ def save_model_package(
     # 4. Create a human-readable README
     readme_content = generate_model_readme(metadata, results)
     readme_file = os.path.join(save_path, "README.md")
-    with open(readme_file, 'w') as f:
+    with open(readme_file, 'w', encoding='utf-8') as f:
         f.write(readme_content)
     print(f"  ✓ README saved: README.md")
     

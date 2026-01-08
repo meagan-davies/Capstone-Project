@@ -1,13 +1,21 @@
-def load_emg_imu(csv_path):
+import pandas as pd
+import numpy as np
+
+def load_emg_imu(csv_path, fs_emg, fs_imu):
     """
     Load EMG + IMU data from Delsys Trigno CSV with proper sensor identification.
-    
+
+    Args:
+        csv_path (str): Path to CSV file.
+        fs_emg (float): EMG sampling frequency from config (Hz).
+        fs_imu (float): IMU sampling frequency from config (Hz).
+
     Returns:
         emg_data: dict {sensor_name: (n_samples, 1)}
         imu_data: dict {sensor_name: (n_samples, 6)} - [acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z]
         time_data: dict {sensor_name: (n_samples, 1)}
-        fs_emg: EMG sampling frequency
-        fs_imu: IMU sampling frequency
+        fs_emg: float
+        fs_imu: float
     """
     # Read sensor row (row 4)
     sensor_row = pd.read_csv(csv_path, header=None, skiprows=3, nrows=1, skipinitialspace=True)
@@ -23,7 +31,6 @@ def load_emg_imu(csv_path):
     for sensor, meas in zip(sensor_row, meas_row):
         sensor = str(sensor).strip() if pd.notna(sensor) else "Unknown"
         meas = str(meas).strip() if pd.notna(meas) else "Unknown"
-        
         sensor_counter[sensor] = sensor_counter.get(sensor, 0) + 1
         unique_sensor = f"{sensor}_{sensor_counter[sensor]}"
         combined_cols.append(f"{unique_sensor}||{meas}")
@@ -41,20 +48,15 @@ def load_emg_imu(csv_path):
         combined_cols = combined_cols[:n_cols]
 
     df.columns = combined_cols
-
-    # Convert to numeric
     df = df.apply(lambda x: pd.to_numeric(x.astype(str).str.strip(), errors='coerce'))
     df = df.dropna(how='all')  # Remove completely empty rows
 
     # Organize data by sensor
     sensor_data = {}
-    
     for col in df.columns:
         if '||' not in col:
             continue
-            
         sensor_name, meas_name = col.split('||')
-        
         if sensor_name not in sensor_data:
             sensor_data[sensor_name] = {
                 'emg': None,
@@ -63,9 +65,7 @@ def load_emg_imu(csv_path):
                 'gyro_x': None, 'gyro_y': None, 'gyro_z': None,
                 'time_imu': None
             }
-        
         data_col = df[col].dropna().values
-        
         # Classify measurement type
         if '(mV)' in meas_name and 'EMG' in meas_name:
             sensor_data[sensor_name]['emg'] = data_col
@@ -90,7 +90,7 @@ def load_emg_imu(csv_path):
     emg_data = {}
     imu_data = {}
     time_data = {}
-    
+
     for sensor_name, data in sensor_data.items():
         # EMG data
         if data['emg'] is not None and len(data['emg']) > 0:
@@ -99,19 +99,10 @@ def load_emg_imu(csv_path):
                 time_data[sensor_name] = data['time_emg'].reshape(-1, 1)
         
         # IMU data (stack acc + gyro)
-        imu_channels = []
-        for key in ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']:
-            if data[key] is not None and len(data[key]) > 0:
-                imu_channels.append(data[key])
-        
+        imu_channels = [data[key] for key in ['acc_x','acc_y','acc_z','gyro_x','gyro_y','gyro_z'] if data[key] is not None and len(data[key]) > 0]
         if len(imu_channels) > 0:
-            # Find minimum length to align all IMU channels
             min_len = min(len(ch) for ch in imu_channels)
             imu_channels = [ch[:min_len] for ch in imu_channels]
             imu_data[sensor_name] = np.column_stack(imu_channels)
 
-    # Determine sampling frequencies from data
-    fs_emg = 963  # Hz (from Delsys spec)
-    fs_imu = 148.148  # Hz (from Delsys spec)
-    
     return emg_data, imu_data, time_data, fs_emg, fs_imu

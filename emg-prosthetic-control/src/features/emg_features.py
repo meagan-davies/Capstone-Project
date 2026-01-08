@@ -1,4 +1,6 @@
-def extract_emg_features(window, fs=963):
+import numpy as np
+
+def extract_emg_features(window, fs):
     """Extract comprehensive EMG features from a window"""
     # Time-domain features
     mav = np.mean(np.abs(window))
@@ -22,7 +24,7 @@ def extract_emg_features(window, fs=963):
     if total_power > 0:
         mnf = np.sum(freqs * power_spectrum) / total_power
         cumsum = np.cumsum(power_spectrum)
-        mdf_idx = np.argmax(cumsum >= total_power/2)
+        mdf_idx = np.argmax(cumsum >= total_power / 2)
         mdf = freqs[mdf_idx]
     else:
         mnf = 0

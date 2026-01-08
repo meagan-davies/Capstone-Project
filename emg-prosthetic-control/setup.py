@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="capstone-emg-prosthetic-control",
+    name="emg-prosthetic-control",
     version="0.1.0",
     author="Meagan Davies",
     description="EMG+IMU classification for prosthetic hand control",

@@ -1,3 +1,5 @@
+import numpy as np
+
 def extract_imu_features(window):
     """Extract IMU features from a window (works for any number of axes)"""
     # Time-domain features
