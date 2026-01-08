@@ -20,7 +20,8 @@ data/*
 models/saved_models/*
 !models/saved_models/.gitkeep
 
-# Delsys API credentials
+# Delsys API + credentials
+resources/DelsysAPI
 resources/delsys_key.txt
 resources/delsys_license.lic
 
