@@ -1,33 +1,31 @@
 """
-Delsys Client - Wrapper around official Delsys TrignoBase API
+Delsys Client - Official AeroPy API Wrapper
 
-This file wraps the official Delsys Example-Applications Python code
-to make it easier to use in our real-time classification system.
+Based on official Delsys Example-Applications Python documentation.
+This wraps the official AeroPy API to work with our classification system.
 
 Prerequisites:
-    1. Copy Example-Applications/Python/ files to resources/DelsysAPI/
+    1. Copy DelsysAPI.dll to resources/DelsysAPI/
     2. Install pythonnet: pip install pythonnet
-    3. Create resources/delsys_key.txt with your API key
-    4. Create resources/delsys_license.lic with your license
+    3. Get key/license from Delsys
 """
 
 import sys
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import numpy as np
 
 
-# Add DelsysAPI to Python path
 def _setup_delsys_path():
-    """Add Delsys API directories to Python path"""
+    """Add DelsysAPI to Python path"""
     project_root = Path(__file__).parent.parent.parent
     delsys_path = project_root / "resources" / "DelsysAPI"
     
     if not delsys_path.exists():
         raise FileNotFoundError(
             f"DelsysAPI not found at: {delsys_path}\n"
-            f"Please copy files from Example-Applications/Python/ to resources/DelsysAPI/"
+            f"Please copy DelsysAPI.dll to resources/DelsysAPI/"
         )
     
     if str(delsys_path) not in sys.path:
@@ -35,22 +33,32 @@ def _setup_delsys_path():
 
 _setup_delsys_path()
 
-# Import official Delsys API
+
+# Import official Delsys API (following official documentation)
 try:
     import clr
     clr.AddReference("DelsysAPI")
+    clr.AddReference("System.Collections")
     from Aero import AeroPy
     DELSYS_AVAILABLE = True
 except Exception as e:
     print(f"⚠ Warning: Could not load DelsysAPI: {e}")
+    print("Make sure DelsysAPI.dll is in resources/DelsysAPI/")
     DELSYS_AVAILABLE = False
 
 
 class DelsysClient:
     """
-    Wrapper around official Delsys TrignoBase API.
+    Wrapper around official Delsys AeroPy API.
     
-    Simplifies the official API for our real-time classification needs.
+    Follows the official Delsys Python example structure but
+    simplified for our real-time classification needs.
+    
+    Official docs pattern:
+        BaseInstance = AeroPy()
+        BaseInstance.ValidateBase(key, license)
+        BaseInstance.ScanSensors()
+        ...
     """
     
     def __init__(self, key: str, license: str):
@@ -58,7 +66,7 @@ class DelsysClient:
         Initialize client with credentials.
         
         Args:
-            key: Your Delsys API key
+            key: Your Delsys API key string
             license: Your Delsys license string
         """
         if not DELSYS_AVAILABLE:
@@ -66,26 +74,41 @@ class DelsysClient:
         
         self.key = key
         self.license = license
-        self.trigno_base = None
+        
+        # Create AeroPy instance (official pattern)
+        self.base = AeroPy()
+        
+        # State tracking
         self.is_connected = False
+        self.is_configured = False
         self.is_streaming = False
+        
+        # Sensor and channel info
+        self.sensors = []
         self.channel_guids = []
         self.channel_info = {}
     
     def connect(self) -> bool:
         """
-        Connect to Trigno base station.
+        Connect and validate base station.
+        
+        Official API method: ValidateBase(key, license)
         
         Returns:
             True if successful
         """
         try:
-            # Create TrignoBase object (official Delsys API)
-            self.trigno_base = AeroPy.TrignoBase(self.key, self.license)
+            print("Connecting to Trigno base station...")
             
-            # Validate connection
-            if not self.trigno_base.ValidateBase("RF"):
-                print("✗ Failed to validate Trigno base")
+            # Official API call
+            self.base.ValidateBase(self.key, self.license)
+            
+            # Check pipeline state
+            state = self.base.GetPipelineState()
+            print(f"  Pipeline state: {state}")
+            
+            if state not in ["Off", "Connected"]:
+                print(f"✗ Unexpected pipeline state: {state}")
                 return False
             
             self.is_connected = True
@@ -94,29 +117,52 @@ class DelsysClient:
             
         except Exception as e:
             print(f"✗ Connection error: {e}")
+            print("\nTroubleshooting:")
+            print("  - Check key and license are correct")
+            print("  - Ensure base station is plugged in via USB")
+            print("  - Make sure no other software is using the base")
             return False
     
     def scan_sensors(self) -> bool:
         """
         Scan for paired sensors.
         
+        Official API method: ScanSensors()
+        Pipeline must be in Off or Connected state.
+        
         Returns:
             True if sensors found
         """
-        if not self.trigno_base:
-            print("✗ Not connected")
+        if not self.is_connected:
+            print("✗ Not connected - call connect() first")
             return False
         
         try:
-            sensors = self.trigno_base.ScanSensors()
+            print("Scanning for sensors...")
             
-            if len(sensors) == 0:
+            # Official API call (async)
+            # The Task is awaited internally by pythonnet
+            self.base.ScanSensors()
+            
+            # Get scanned sensors
+            self.sensors = list(self.base.GetScannedSensorsFound())
+            
+            if len(self.sensors) == 0:
                 print("✗ No sensors found")
+                print("\nTroubleshooting:")
+                print("  - Ensure sensors are powered on (remove from charger)")
+                print("  - Check sensors are paired (use PairSensor if needed)")
+                print("  - Verify sensors are in range")
                 return False
             
-            print(f"✓ Found {len(sensors)} sensor(s)")
-            for i, sensor in enumerate(sensors):
-                print(f"  Sensor {i+1}: {sensor.FriendlyName}")
+            print(f"✓ Found {len(self.sensors)} sensor(s)")
+            
+            # Display sensor info
+            for i, sensor in enumerate(self.sensors):
+                pair_num = sensor.PairNumber
+                sid = sensor.Properties.Sid
+                mode = sensor.Configuration.ModeString
+                print(f"  Sensor {i+1}: Pair#{pair_num}, SID:{sid}, Mode:{mode}")
             
             return True
             
@@ -124,75 +170,182 @@ class DelsysClient:
             print(f"✗ Scan error: {e}")
             return False
     
-    def configure(self) -> bool:
+    def select_all_sensors(self) -> bool:
         """
-        Configure data collection.
+        Select all scanned sensors for data collection.
+        
+        Official API method: SelectAllSensors()
         
         Returns:
             True if successful
         """
-        if not self.trigno_base:
+        try:
+            success = self.base.SelectAllSensors()
+            if success:
+                print(f"✓ Selected all {len(self.sensors)} sensors")
+            return success
+        except Exception as e:
+            print(f"✗ Error selecting sensors: {e}")
+            return False
+    
+    def set_sensor_mode(self, sensor_index: int, mode: str) -> bool:
+        """
+        Set sample mode for a specific sensor.
+        
+        Official API method: SetSampleMode(componentNum, sampleMode)
+        
+        Args:
+            sensor_index: Index of sensor (0-based)
+            mode: Mode string (e.g., "Default", "EMG Only")
+            
+        Returns:
+            True if successful
+        """
+        try:
+            self.base.SetSampleMode(sensor_index, mode)
+            print(f"✓ Set sensor {sensor_index} to mode: {mode}")
+            return True
+        except Exception as e:
+            print(f"✗ Error setting mode: {e}")
+            return False
+    
+    def configure(self, enable_start_trigger: bool = False, 
+                  enable_stop_trigger: bool = False) -> bool:
+        """
+        Configure data collection pipeline.
+        
+        Official API method: Configure(starttrigger, stoptrigger)
+        Pipeline transitions to Armed state.
+        
+        Args:
+            enable_start_trigger: Wait for external trigger to start
+            enable_stop_trigger: Wait for external trigger to stop
+            
+        Returns:
+            True if successful
+        """
+        if not self.is_connected:
             print("✗ Not connected")
             return False
         
         try:
-            # Set sample mode (EMG + IMU)
-            self.trigno_base.SetSampleMode(self.trigno_base.SampleMode.Default)
+            print("Configuring data collection...")
             
-            # Configure
-            if not self.trigno_base.Configure():
-                print("✗ Configuration failed")
+            # Select all sensors first
+            if not self.select_all_sensors():
                 return False
             
-            # Get channel information
-            self.channel_guids = list(self.trigno_base.GetChannelGuids())
+            # Official API call
+            self.base.Configure(enable_start_trigger, enable_stop_trigger)
+            
+            # Verify configuration
+            if not self.base.IsPipelineConfigured():
+                print("✗ Pipeline not configured")
+                return False
+            
+            # Parse channel information
             self._parse_channels()
             
+            self.is_configured = True
             print(f"✓ Configured {len(self.channel_guids)} channels")
+            
+            # Show pipeline state
+            state = self.base.GetPipelineState()
+            print(f"  Pipeline state: {state}")
+            
             return True
             
         except Exception as e:
             print(f"✗ Configuration error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _parse_channels(self):
-        """Parse channel information for later use"""
-        for guid in self.channel_guids:
-            try:
-                name = self.trigno_base.GetChannelName(guid)
-                chan_type = str(self.trigno_base.GetChannelType(guid))
-                enabled = self.trigno_base.GetChannelIsEnabled(guid)
+        """
+        Parse channel information after configuration.
+        
+        Uses official API properties:
+        - sensor.TrignoChannels: List of ChannelTrigno objects
+        - channel.Id: GUID for data parsing
+        - channel.Name: Channel name (e.g., "EMG 1")
+        - channel.Type: ChannelTypes enum (EMG, ACC, GYRO, etc.)
+        - channel.IsEnabled: Whether channel is active
+        """
+        self.channel_info = {}
+        self.channel_guids = []
+        
+        emg_count = 0
+        acc_count = 0
+        gyro_count = 0
+        
+        for sensor_idx, sensor in enumerate(self.sensors):
+            # Get all channels for this sensor
+            channels = list(sensor.TrignoChannels)
+            
+            for channel in channels:
+                # Only use enabled channels
+                if not channel.IsEnabled:
+                    continue
                 
-                if enabled:
-                    self.channel_info[guid] = {
-                        'name': name,
-                        'type': chan_type
-                    }
-            except:
-                pass
+                guid = channel.Id
+                name = channel.Name
+                chan_type = str(channel.Type)  # Convert enum to string
+                sample_rate = channel.SampleRate
+                unit = str(channel.Unit)
+                
+                self.channel_guids.append(guid)
+                self.channel_info[guid] = {
+                    'name': name,
+                    'type': chan_type,
+                    'sample_rate': sample_rate,
+                    'unit': unit,
+                    'sensor_index': sensor_idx
+                }
+                
+                # Count by type
+                if 'EMG' in chan_type:
+                    emg_count += 1
+                elif 'ACC' in chan_type:
+                    acc_count += 1
+                elif 'GYRO' in chan_type:
+                    gyro_count += 1
         
-        # Count channels by type
-        emg_count = sum(1 for c in self.channel_info.values() if 'EMG' in c['type'])
-        acc_count = sum(1 for c in self.channel_info.values() if 'ACC' in c['type'])
-        gyro_count = sum(1 for c in self.channel_info.values() if 'GYRO' in c['type'])
-        
-        print(f"  EMG: {emg_count}, ACC: {acc_count}, GYRO: {gyro_count}")
+        print(f"  Channel breakdown:")
+        print(f"    EMG: {emg_count}")
+        print(f"    ACC: {acc_count}")
+        print(f"    GYRO: {gyro_count}")
     
-    def start_streaming(self) -> bool:
+    def start_streaming(self, yt_data: bool = False) -> bool:
         """
         Start data streaming.
         
+        Official API method: Start(ytdata)
+        Pipeline must be in Armed state, transitions to Running.
+        
+        Args:
+            yt_data: If True, get Y-T formatted data (time-stamped)
+            
         Returns:
             True if successful
         """
-        if not self.trigno_base:
-            print("✗ Not connected")
+        if not self.is_configured:
+            print("✗ Not configured - call configure() first")
             return False
         
         try:
-            self.trigno_base.Start()
+            print("Starting data stream...")
+            
+            # Official API call
+            self.base.Start(yt_data)
+            
             self.is_streaming = True
-            print("✓ Started streaming")
+            print("✓ Data streaming started")
+            
+            # Show pipeline state
+            state = self.base.GetPipelineState()
+            print(f"  Pipeline state: {state}")
+            
             return True
             
         except Exception as e:
@@ -203,61 +356,110 @@ class DelsysClient:
         """
         Poll data from sensors.
         
+        Official API methods:
+        - CheckDataQueue(): Check if data ready
+        - PollData(): Get Dictionary<Guid, List<double>>
+        
         Returns:
-            Dictionary mapping channel GUIDs to data arrays, or None if no data
+            Dictionary mapping channel GUIDs (as strings) to data arrays,
+            or None if no data available
         """
         if not self.is_streaming:
             return None
         
         try:
-            # Check if data available
-            if not self.trigno_base.CheckDataQueue():
+            # Official API call - check if data ready
+            if not self.base.CheckDataQueue():
                 return None
             
-            # Get data
-            data_dict = self.trigno_base.PollData()
+            # Official API call - get data
+            # Returns C# Dictionary<Guid, List<double>>
+            data_dict = self.base.PollData()
             
-            # Convert to numpy arrays
+            # Convert to Python format
             result = {}
             for guid, values in data_dict.items():
-                result[guid] = np.array(list(values))
+                # Convert GUID to string for dictionary key
+                guid_str = str(guid)
+                # Convert C# List to numpy array
+                result[guid_str] = np.array(list(values))
             
             return result
             
         except Exception as e:
-            print(f"⚠ Poll error: {e}")
+            # Don't print every poll error (too noisy)
             return None
     
     def stop_streaming(self):
-        """Stop data streaming"""
+        """
+        Stop data streaming.
+        
+        Official API method: Stop()
+        Pipeline transitions from Running to Armed.
+        """
         if self.is_streaming:
             try:
-                self.trigno_base.Stop()
+                self.base.Stop()
                 self.is_streaming = False
                 print("✓ Stopped streaming")
+                
+                state = self.base.GetPipelineState()
+                print(f"  Pipeline state: {state}")
+                
             except Exception as e:
                 print(f"⚠ Stop error: {e}")
     
-    def disconnect(self):
-        """Disconnect from base station"""
-        self.stop_streaming()
-        if self.is_connected and self.trigno_base:
+    def reset_pipeline(self):
+        """
+        Reset/disarm pipeline.
+        
+        Official API method: ResetPipeline()
+        Pipeline transitions from Armed to Connected.
+        Allows scanning/pairing after stopping collection.
+        """
+        if self.is_configured:
             try:
-                self.trigno_base.Dispose()
-                self.is_connected = False
-                print("✓ Disconnected")
+                self.base.ResetPipeline()
+                self.is_configured = False
+                print("✓ Pipeline reset")
+                
+                state = self.base.GetPipelineState()
+                print(f"  Pipeline state: {state}")
+                
             except Exception as e:
-                print(f"⚠ Disconnect error: {e}")
+                print(f"⚠ Reset error: {e}")
     
-    def get_emg_channel_guids(self):
-        """Get list of EMG channel GUIDs"""
-        return [guid for guid, info in self.channel_info.items() 
-                if 'EMG' in info['type']]
+    def disconnect(self):
+        """Cleanup and disconnect"""
+        if self.is_streaming:
+            self.stop_streaming()
+        
+        if self.is_configured:
+            self.reset_pipeline()
+        
+        print("✓ Disconnected")
     
-    def get_imu_channel_guids(self):
-        """Get list of IMU channel GUIDs (ACC + GYRO)"""
-        return [guid for guid, info in self.channel_info.items() 
-                if 'ACC' in info['type'] or 'GYRO' in info['type']]
+    def get_emg_channel_guids(self) -> List[str]:
+        """Get list of EMG channel GUIDs (as strings)"""
+        return [
+            str(guid) for guid, info in self.channel_info.items() 
+            if 'EMG' in info['type']
+        ]
+    
+    def get_imu_channel_guids(self) -> List[str]:
+        """Get list of IMU channel GUIDs (ACC + GYRO, as strings)"""
+        return [
+            str(guid) for guid, info in self.channel_info.items() 
+            if 'ACC' in info['type'] or 'GYRO' in info['type']
+        ]
+    
+    def get_pipeline_state(self) -> str:
+        """Get current pipeline state"""
+        return self.base.GetPipelineState()
+    
+    def get_total_packets(self) -> int:
+        """Get total data packets collected"""
+        return self.base.GetTotalPackets()
 
 
 def load_credentials(
@@ -274,41 +476,98 @@ def load_credentials(
     license_path = Path(license_file)
     
     if not key_path.exists():
-        raise FileNotFoundError(f"Key file not found: {key_path}")
+        raise FileNotFoundError(
+            f"Key file not found: {key_path}\n"
+            f"Create this file with your Delsys API key"
+        )
     
     if not license_path.exists():
-        raise FileNotFoundError(f"License file not found: {license_path}")
+        raise FileNotFoundError(
+            f"License file not found: {license_path}\n"
+            f"Create this file with your Delsys license"
+        )
     
     key = key_path.read_text().strip()
     license = license_path.read_text().strip()
+    
+    if not key or not license:
+        raise ValueError("Key or license file is empty")
     
     return key, license
 
 
 # Test code
 if __name__ == "__main__":
-    print("Testing Delsys client...")
+    print("="*60)
+    print("Testing Delsys Client (Official API)")
+    print("="*60)
     
     try:
         # Load credentials
+        print("\nLoading credentials...")
         KEY, LICENSE = load_credentials()
-        print(f"✓ Credentials loaded")
+        print(f"✓ Key: {KEY[:10]}... ({len(KEY)} chars)")
+        print(f"✓ License: {LICENSE[:10]}... ({len(LICENSE)} chars)")
         
         # Create client
+        print("\nCreating client...")
         client = DelsysClient(KEY, LICENSE)
+        print("✓ Client created")
         
         # Test connection
-        if client.connect():
-            print("\n✓ Connection successful")
-            
-            if client.scan_sensors():
-                print("\n✓ Sensors found")
-                
-                if client.configure():
-                    print("\n✓ Configuration successful")
-                    print("\nAll tests passed!")
-            
-            client.disconnect()
+        print("\n" + "="*60)
+        print("Test 1: Connection")
+        print("="*60)
+        if not client.connect():
+            print("✗ Connection failed")
+            exit(1)
         
+        # Test scan
+        print("\n" + "="*60)
+        print("Test 2: Sensor Scan")
+        print("="*60)
+        if not client.scan_sensors():
+            print("✗ Scan failed")
+            exit(1)
+        
+        # Test configuration
+        print("\n" + "="*60)
+        print("Test 3: Configuration")
+        print("="*60)
+        if not client.configure():
+            print("✗ Configuration failed")
+            exit(1)
+        
+        # Test streaming (brief)
+        print("\n" + "="*60)
+        print("Test 4: Data Streaming (5 seconds)")
+        print("="*60)
+        
+        if client.start_streaming():
+            import time
+            packets_received = 0
+            
+            for i in range(50):  # 5 seconds at 10 Hz
+                data = client.poll_data()
+                if data:
+                    packets_received += 1
+                    print(f"\r  Packets: {packets_received}, Channels: {len(data)}", 
+                          end='', flush=True)
+                time.sleep(0.1)
+            
+            print(f"\n✓ Received {packets_received} data packets")
+            client.stop_streaming()
+        
+        # Cleanup
+        client.disconnect()
+        
+        print("\n" + "="*60)
+        print("✓ All tests passed!")
+        print("="*60)
+        
+    except FileNotFoundError as e:
+        print(f"\n✗ Credential error: {e}")
     except Exception as e:
         print(f"\n✗ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
