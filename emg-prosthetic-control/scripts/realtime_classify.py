@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument(
         '--model-dir',
         type=str,
-        default='models/saved_models',
+        default='models/',
         help='Directory containing saved models'
     )
     return parser.parse_args()

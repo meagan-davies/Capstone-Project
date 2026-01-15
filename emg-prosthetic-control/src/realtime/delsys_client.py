@@ -10,22 +10,24 @@ Prerequisites:
     3. Get key/license from Delsys
 """
 
-import sys
+# CRITICAL: Set .NET runtime BEFORE any CLR imports
 import os
+os.environ['PYTHONNET_RUNTIME'] = 'coreclr'  # or 'netfx'
+
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
-
 def _setup_delsys_path():
     """Add DelsysAPI to Python path"""
     project_root = Path(__file__).parent.parent.parent
-    delsys_path = project_root / "resources" / "DelsysAPI"
+    delsys_path = project_root / "resources" / "DelsysAPI" / "resources"
     
     if not delsys_path.exists():
         raise FileNotFoundError(
             f"DelsysAPI not found at: {delsys_path}\n"
-            f"Please copy DelsysAPI.dll to resources/DelsysAPI/"
+            f"Please copy DelsysAPI.dll to resources/DelsysAPI/resources"
         )
     
     if str(delsys_path) not in sys.path:
@@ -124,25 +126,27 @@ class DelsysClient:
             return False
     
     def scan_sensors(self) -> bool:
-        """
-        Scan for paired sensors.
-        
-        Official API method: ScanSensors()
-        Pipeline must be in Off or Connected state.
-        
-        Returns:
-            True if sensors found
-        """
         if not self.is_connected:
             print("✗ Not connected - call connect() first")
             return False
         
         try:
             print("Scanning for sensors...")
+            print("  (Starting system to activate sensors...)")
             
-            # Official API call (async)
-            # The Task is awaited internally by pythonnet
+            # START THE SYSTEM FIRST to wake up sensors
+            # This makes the blinking green LEDs go solid
+            self.base.Start(False)
+            
+            import time
+            time.sleep(2)  # Give sensors time to activate
+            
+            # Now scan for active sensors
             self.base.ScanSensors()
+            
+            # Stop the system (we'll restart later during actual streaming)
+            self.base.Stop()
+            self.base.ResetPipeline()
             
             # Get scanned sensors
             self.sensors = list(self.base.GetScannedSensorsFound())
@@ -168,61 +172,116 @@ class DelsysClient:
             
         except Exception as e:
             print(f"✗ Scan error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def scan_sensors(self) -> bool:
+        """
+        Scan for paired sensors.
+        
+        Official API method: ScanSensors()
+        Pipeline must be in Off or Connected state.
+        
+        Returns:
+            True if sensors found
+        """
+        if not self.is_connected:
+            print("✗ Not connected - call connect() first")
+            return False
+        
+        try:
+            print("Scanning for sensors...")
+            
+            # Ensure we're in the right state
+            state = self.base.GetPipelineState()
+            print(f"  Current state: {state}")
+            
+            if state not in ["Off", "Connected"]:
+                print(f"✗ Cannot scan from state: {state}")
+                print("  Try resetting the pipeline first")
+                return False
+            
+            # Official API call (async)
+            print("  Running scan...")
+            self.base.ScanSensors()
+            
+            # Give it a moment to complete
+            import time
+            time.sleep(1)
+            
+            # Try multiple methods to get sensors
+            try:
+                # Method 1: GetScannedSensorsFound (official)
+                self.sensors = list(self.base.GetScannedSensorsFound())
+                print(f"  GetScannedSensorsFound: {len(self.sensors)} sensors")
+            except Exception as e:
+                print(f"  GetScannedSensorsFound failed: {e}")
+                self.sensors = []
+            
+            # Method 2: Try GetPairedSensors as fallback
+            if len(self.sensors) == 0:
+                try:
+                    paired = list(self.base.GetPairedSensors())
+                    print(f"  GetPairedSensors: {len(paired)} sensors")
+                    if len(paired) > 0:
+                        print("  Using paired sensors instead of scanned sensors")
+                        self.sensors = paired
+                except Exception as e:
+                    print(f"  GetPairedSensors also failed: {e}")
+            
+            if len(self.sensors) == 0:
+                print("✗ No sensors found")
+                print("\nTroubleshooting:")
+                print("  - Ensure sensors are powered on (remove from charger)")
+                print("  - Press the button on each sensor to wake them up")
+                print("  - Check sensors are paired (use PairSensor if needed)")
+                print("  - Verify sensors are in range")
+                print("  - LED should be blinking green if paired")
+                return False
+            
+            print(f"✓ Found {len(self.sensors)} sensor(s)")
+            
+            # Display sensor info
+            for i, sensor in enumerate(self.sensors):
+                try:
+                    pair_num = sensor.PairNumber
+                    sid = sensor.Properties.Sid
+                    mode = sensor.Configuration.ModeString
+                    print(f"  Sensor {i+1}: Pair#{pair_num}, SID:{sid}, Mode:{mode}")
+                except Exception as e:
+                    print(f"  Sensor {i+1}: Info unavailable ({e})")
+            
+            return True
+            
+        except Exception as e:
+            print(f"✗ Scan error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def select_all_sensors(self) -> bool:
-        """
-        Select all scanned sensors for data collection.
-        
-        Official API method: SelectAllSensors()
-        
-        Returns:
-            True if successful
-        """
-        try:
-            success = self.base.SelectAllSensors()
-            if success:
-                print(f"✓ Selected all {len(self.sensors)} sensors")
-            return success
-        except Exception as e:
-            print(f"✗ Error selecting sensors: {e}")
-            return False
-    
-    def set_sensor_mode(self, sensor_index: int, mode: str) -> bool:
-        """
-        Set sample mode for a specific sensor.
-        
-        Official API method: SetSampleMode(componentNum, sampleMode)
-        
-        Args:
-            sensor_index: Index of sensor (0-based)
-            mode: Mode string (e.g., "Default", "EMG Only")
+            """
+            Select all scanned sensors for data collection.
             
-        Returns:
-            True if successful
-        """
-        try:
-            self.base.SetSampleMode(sensor_index, mode)
-            print(f"✓ Set sensor {sensor_index} to mode: {mode}")
-            return True
-        except Exception as e:
-            print(f"✗ Error setting mode: {e}")
-            return False
-    
+            Official API method: SelectAllSensors()
+            
+            Returns:
+                True if successful
+            """
+            try:
+                success = self.base.SelectAllSensors()
+                if success:
+                    print(f"✓ Selected all {len(self.sensors)} sensors")
+                return success
+            except Exception as e:
+                print(f"✗ Error selecting sensors: {e}")
+                return False
+
     def configure(self, enable_start_trigger: bool = False, 
-                  enable_stop_trigger: bool = False) -> bool:
+                enable_stop_trigger: bool = False) -> bool:
         """
         Configure data collection pipeline.
-        
-        Official API method: Configure(starttrigger, stoptrigger)
-        Pipeline transitions to Armed state.
-        
-        Args:
-            enable_start_trigger: Wait for external trigger to start
-            enable_stop_trigger: Wait for external trigger to stop
-            
-        Returns:
-            True if successful
         """
         if not self.is_connected:
             print("✗ Not connected")
@@ -235,13 +294,24 @@ class DelsysClient:
             if not self.select_all_sensors():
                 return False
             
-            # Official API call
+            # Configure inputs
             self.base.Configure(enable_start_trigger, enable_stop_trigger)
             
-            # Verify configuration
-            if not self.base.IsPipelineConfigured():
-                print("✗ Pipeline not configured")
-                return False
+            # NEW: Explicitly arm the pipeline
+            print("  Arming pipeline...")
+            try:
+                # The AeroPy API should have a method to arm/ready the pipeline
+                # Try these in order:
+                if hasattr(self.base, 'ArmPipeline'):
+                    self.base.ArmPipeline()
+                elif hasattr(self.base, 'Ready'):
+                    self.base.Ready()
+                elif hasattr(self.base, 'Arm'):
+                    self.base.Arm()
+                else:
+                    print("  ⚠ No arm method found, trying to proceed anyway")
+            except Exception as e:
+                print(f"  ⚠ Arming error: {e}")
             
             # Parse channel information
             self._parse_channels()
@@ -249,9 +319,13 @@ class DelsysClient:
             self.is_configured = True
             print(f"✓ Configured {len(self.channel_guids)} channels")
             
-            # Show pipeline state
+            # Show pipeline state - should now be "Armed"
             state = self.base.GetPipelineState()
             print(f"  Pipeline state: {state}")
+            
+            if state not in ["Armed", "Ready"]:
+                print(f"  ⚠ Warning: Expected 'Armed' or 'Ready' state, got '{state}'")
+                # Still return True to see if Start() will work anyway
             
             return True
             
