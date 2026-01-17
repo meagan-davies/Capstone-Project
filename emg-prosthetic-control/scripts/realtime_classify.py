@@ -140,7 +140,7 @@ def main():
                 features = processor.extract_window_features()
                 
                 if features is not None:
-                    pred_label, pred_proba = classifier.predict_smoothed(features)
+                    pred_label, pred_proba = classifier.predict(features)
                     class_name = classifier.get_class_name(pred_label)
                     confidence = pred_proba[pred_label] * 100
                     

@@ -278,63 +278,111 @@ class DelsysClient:
                 print(f"✗ Error selecting sensors: {e}")
                 return False
 
-    def configure(self, enable_start_trigger: bool = False, 
-                enable_stop_trigger: bool = False) -> bool:
-        """
-        Configure data collection pipeline.
-        """
+    def scan_sensors(self) -> bool:
+        """Scan using EXACT demo pattern"""
         if not self.is_connected:
-            print("✗ Not connected")
             return False
         
         try:
-            print("Configuring data collection...")
+            print("Scanning for sensors...")
             
-            # Select all sensors first
-            if not self.select_all_sensors():
+            # Use their exact pattern with .Result
+            try:
+                f = self.base.ScanSensors().Result
+            except Exception as e:
+                print("Scan attempt retry...")
+                import time
+                time.sleep(1)
+                try:
+                    f = self.base.ScanSensors().Result
+                except:
+                    pass
+            
+            self.sensors = list(self.base.GetScannedSensorsFound())
+            
+            if len(self.sensors) == 0:
+                print("✗ No sensors found")
                 return False
             
-            # Configure inputs
-            self.base.Configure(enable_start_trigger, enable_stop_trigger)
+            print(f"✓ Found {len(self.sensors)} sensor(s)")
             
-            # NEW: Explicitly arm the pipeline
-            print("  Arming pipeline...")
-            try:
-                # The AeroPy API should have a method to arm/ready the pipeline
-                # Try these in order:
-                if hasattr(self.base, 'ArmPipeline'):
-                    self.base.ArmPipeline()
-                elif hasattr(self.base, 'Ready'):
-                    self.base.Ready()
-                elif hasattr(self.base, 'Arm'):
-                    self.base.Arm()
-                else:
-                    print("  ⚠ No arm method found, trying to proceed anyway")
-            except Exception as e:
-                print(f"  ⚠ Arming error: {e}")
+            # Display info
+            for i, sensor in enumerate(self.sensors):
+                print(f"  Sensor {i+1}: Pair#{sensor.PairNumber}, {sensor.Configuration.ModeString}")
             
-            # Parse channel information
-            self._parse_channels()
-            
-            self.is_configured = True
-            print(f"✓ Configured {len(self.channel_guids)} channels")
-            
-            # Show pipeline state - should now be "Armed"
-            state = self.base.GetPipelineState()
-            print(f"  Pipeline state: {state}")
-            
-            if state not in ["Armed", "Ready"]:
-                print(f"  ⚠ Warning: Expected 'Armed' or 'Ready' state, got '{state}'")
-                # Still return True to see if Start() will work anyway
+            # CRITICAL: Select sensors using their EXACT loop pattern
+            for i in range(len(self.sensors)):
+                self.base.SelectSensor(i)
             
             return True
             
+        except Exception as e:
+            print(f"✗ Scan error: {e}")
+            return False
+
+
+    def configure(self, enable_start_trigger: bool = False, 
+                enable_stop_trigger: bool = False) -> bool:
+        """Configure using EXACT demo pattern"""
+        if not self.is_connected:
+            return False
+        
+        try:
+            state = self.base.GetPipelineState()
+            
+            if state == 'Armed':
+                self._parse_channels()
+                self.is_configured = True
+                return True
+            
+            elif state == 'Connected':
+                print("Configuring...")
+                
+                # Call Configure - EXACTLY like demo
+                self.base.Configure(enable_start_trigger, enable_stop_trigger)
+                
+                # Wait and check - EXACTLY like demo
+                import time
+                time.sleep(0.5)
+                state_05 = self.base.GetPipelineState()
+                print(f"  State after 0.5s: {state_05}")
+                
+                time.sleep(1.0)
+                state_15 = self.base.GetPipelineState()
+                print(f"  State after 1.5s: {state_15}")
+                
+                time.sleep(1.0)
+                state_25 = self.base.GetPipelineState()
+                print(f"  State after 2.5s: {state_25}")
+                
+                # Check configured
+                configured = self.base.IsPipelineConfigured()
+                print(f"  IsPipelineConfigured: {configured}")
+                
+                if configured:
+                    self._parse_channels()
+                    self.is_configured = True
+                    
+                    if state_25 != 'Armed':
+                        print(f"  ⚠ WARNING: State is '{state_25}' not 'Armed'")
+                        return False
+                    
+                    print(f"✓ Configured - State: {state_25}")
+                    return True
+                else:
+                    print("  ✗ Configuration failed")
+                    return False
+            
+            else:
+                print(f"✗ Cannot configure from state: {state}")
+                return False
+                
         except Exception as e:
             print(f"✗ Configuration error: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+                        
     def _parse_channels(self):
         """
         Parse channel information after configuration.
@@ -392,38 +440,50 @@ class DelsysClient:
     
     def start_streaming(self, yt_data: bool = False) -> bool:
         """
-        Start data streaming.
-        
-        Official API method: Start(ytdata)
-        Pipeline must be in Armed state, transitions to Running.
-        
-        Args:
-            yt_data: If True, get Y-T formatted data (time-stamped)
-            
-        Returns:
-            True if successful
+        Start data streaming - checking state like official demo
         """
         if not self.is_configured:
             print("✗ Not configured - call configure() first")
             return False
         
         try:
-            print("Starting data stream...")
+            # CRITICAL: Check state before starting (like official demo does)
+            state = self.base.GetPipelineState()
+            print(f"Starting data stream (current state: {state})...")
             
-            # Official API call
+            # Their demo checks if Armed before calling Start
+            if state != 'Armed':
+                print(f"✗ Cannot start from state '{state}'")
+                print(f"  Pipeline must be in 'Armed' state")
+                print(f"\n  Troubleshooting:")
+                print(f"    1. Call configure() again")
+                print(f"    2. Check if Configure() succeeded")
+                print(f"    3. Verify no errors during configuration")
+                return False
+            
+            # Now call Start (same as them)
             self.base.Start(yt_data)
             
+            import time
+            time.sleep(0.5)
+            
             self.is_streaming = True
-            print("✓ Data streaming started")
             
-            # Show pipeline state
-            state = self.base.GetPipelineState()
-            print(f"  Pipeline state: {state}")
+            # Verify we're running
+            final_state = self.base.GetPipelineState()
+            print(f"  Pipeline state: {final_state}")
             
-            return True
-            
+            if final_state == "Running":
+                print("✓ Data streaming started")
+                return True
+            else:
+                print(f"  ⚠ Warning: Expected 'Running', got '{final_state}'")
+                return False
+                
         except Exception as e:
             print(f"✗ Start error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def poll_data(self) -> Optional[Dict[str, np.ndarray]]:
