@@ -50,59 +50,61 @@ class RealtimeClassifier:
         print(f"  Expected features: {self.expected_n_features}")
         print(f"  Classes: {list(self.class_names.values())}")
 
-    def _validate_features(self, features: np.ndarray) -> bool:
-        """Validate feature vector before prediction."""
-        if features is None:
-            return False
+    # def _validate_features(self, features: np.ndarray) -> bool:
+    #     """Validate feature vector before prediction."""
+    #     if features is None:
+    #         return False
 
-        if np.any(np.isnan(features)):
-            return False
+    #     if np.any(np.isnan(features)):
+    #         return False
 
-        if features.ndim != 1:
-            raise ValueError(f"Expected 1D feature vector, got {features.shape}")
+    #     if features.ndim != 1:
+    #         raise ValueError(f"Expected 1D feature vector, got {features.shape}")
 
+    #     if features.shape[0] != self.expected_n_features:
+    #         msg = (
+    #             f"Feature mismatch: got {features.shape[0]}, "
+    #             f"expected {self.expected_n_features}"
+    #         )
+    #         if self.strict_feature_check:
+    #             raise ValueError(msg)
+    #         else:
+    #             print(f"⚠ {msg}")
+    #             return False
+
+    #     return True
+
+    def predict(self, features: np.ndarray):
         if features.shape[0] != self.expected_n_features:
-            msg = (
+            raise ValueError(
                 f"Feature mismatch: got {features.shape[0]}, "
                 f"expected {self.expected_n_features}"
             )
-            if self.strict_feature_check:
-                raise ValueError(msg)
-            else:
-                print(f"⚠ {msg}")
-                return False
-
-        return True
-
-    def predict(self, features: np.ndarray) -> Tuple[Optional[int], Optional[np.ndarray]]:
-        """Predict class from features."""
-        if not self._validate_features(features):
-            return None, None
 
         features_scaled = self.scaler.transform(features.reshape(1, -1))
-
         pred_label = self.model.predict(features_scaled)[0]
         pred_proba = self.model.predict_proba(features_scaled)[0]
 
         return pred_label, pred_proba
 
-    def predict_smoothed(
-        self, features: np.ndarray
-    ) -> Tuple[Optional[int], Optional[np.ndarray]]:
-        """Predict with temporal smoothing."""
-        pred_label, pred_proba = self.predict(features)
 
-        if pred_label is None:
-            return None, None
+    # def predict_smoothed(
+    #     self, features: np.ndarray
+    # ) -> Tuple[Optional[int], Optional[np.ndarray]]:
+    #     """Predict with temporal smoothing."""
+    #     pred_label, pred_proba = self.predict(features)
 
-        self.prediction_buffer.append(pred_label)
+    #     if pred_label is None:
+    #         return None, None
 
-        smoothed_label = max(
-            set(self.prediction_buffer),
-            key=self.prediction_buffer.count,
-        )
+    #     self.prediction_buffer.append(pred_label)
 
-        return smoothed_label, pred_proba
+    #     smoothed_label = max(
+    #         set(self.prediction_buffer),
+    #         key=self.prediction_buffer.count,
+    #     )
+
+    #     return smoothed_label, pred_proba
 
     def get_class_name(self, label: int) -> str:
         return self.class_names.get(label, f"Unknown ({label})")

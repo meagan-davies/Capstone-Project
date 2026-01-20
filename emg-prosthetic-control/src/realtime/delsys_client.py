@@ -687,7 +687,7 @@ if __name__ == "__main__":
                     packets_received += 1
                     print(f"\r  Packets: {packets_received}, Channels: {len(data)}", 
                           end='', flush=True)
-                time.sleep(0.1)
+                time.sleep(1)
             
             print(f"\n✓ Received {packets_received} data packets")
             client.stop_streaming()
