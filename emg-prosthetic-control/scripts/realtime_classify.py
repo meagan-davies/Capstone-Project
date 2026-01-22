@@ -89,6 +89,31 @@ def main():
         print("✗ Configuration failed")
         client.disconnect()
         exit(1)
+
+    # ✓ Configuration succeeded - NOW run diagnostic
+    print("\n" + "="*70)
+    print("COMPLETE CHANNEL DIAGNOSTIC")
+    print("="*70)
+    print(f"Total channels in hardware: {len(client.channel_info)}")
+
+    # Group by type
+    type_counts = {}
+    for guid, info in client.channel_info.items():
+        chan_type = info['type']
+        if chan_type not in type_counts:
+            type_counts[chan_type] = 0
+        type_counts[chan_type] += 1
+
+    print("\nChannel types:")
+    for chan_type, count in sorted(type_counts.items()):
+        print(f"  {chan_type:20s}: {count}")
+
+    print(f"\nTotal: {sum(type_counts.values())}")
+    print("="*70)
+
+    # PAUSE HERE - Share this output with me!
+    input("\nPress Enter to continue...")
+
     
     # ========== STEP 5: Create Processor ==========
     print("\nStep 5: Setting up data processor...")
@@ -118,14 +143,22 @@ def main():
     print("Press Ctrl+C to stop\n")
     
     is_running = True
-    
+    from threading import Lock
+
+    latest_packet = None
+    packet_lock = Lock()
+
     def poll_loop():
         """Background thread to continuously poll data"""
+        nonlocal latest_packet
         while is_running:
             data = client.poll_data()
             if data:
+                with packet_lock:
+                    latest_packet = data
                 processor.add_data(data)
             time.sleep(0.001)
+
     
     # Start polling thread
     poll_thread = Thread(target=poll_loop, daemon=True)
@@ -138,23 +171,28 @@ def main():
         while True:
             if processor.is_window_ready():
                 features = processor.extract_window_features()
-                
+
                 if features is not None:
                     pred_label, pred_proba = classifier.predict(features)
                     class_name = classifier.get_class_name(pred_label)
                     confidence = pred_proba[pred_label] * 100
-                    
+
                     prediction_count += 1
-                    
-                    # Display prediction
+
                     print(
-                        f"\r[{prediction_count:4d}] {class_name:12s} | "
-                        f"Confidence: {confidence:5.1f}%", 
-                        end='', 
-                        flush=True
+                        f"\n[{prediction_count:4d}] {class_name:12s} | "
+                        f"Confidence: {confidence:5.1f}%"
                     )
-            
-            time.sleep(0.01)
+
+                    # 🔍 PRINT RAW DATA THAT PRODUCED THIS WINDOW
+                    with packet_lock:
+                        packet = latest_packet
+
+                    if packet is not None:
+                        client.describe_packet(packet)
+
+            time.sleep(0.5)
+
     
     except KeyboardInterrupt:
         print("\n\nStopping...")

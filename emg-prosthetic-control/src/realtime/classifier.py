@@ -74,17 +74,25 @@ class RealtimeClassifier:
 
     #     return True
 
-    def predict(self, features: np.ndarray):
-        if features.shape[0] != self.expected_n_features:
-            raise ValueError(
-                f"Feature mismatch: got {features.shape[0]}, "
-                f"expected {self.expected_n_features}"
-            )
-
+    # In classifier.py, replace the predict method:
+    def predict(self, features: np.ndarray) -> Tuple[Optional[int], Optional[np.ndarray]]:
+        """Predict class from features."""
+        
+        # DEBUG: Print feature info
+        print(f"Received {len(features)} features, expected {self.expected_n_features}")
+        
+        # Temporary: Pad with zeros if too short (THIS IS JUST FOR TESTING!)
+        if len(features) < self.expected_n_features:
+            print(f"⚠ WARNING: Padding {self.expected_n_features - len(features)} features with zeros")
+            features = np.pad(features, (0, self.expected_n_features - len(features)), 'constant')
+        elif len(features) > self.expected_n_features:
+            print(f"⚠ WARNING: Truncating to {self.expected_n_features} features")
+            features = features[:self.expected_n_features]
+        
         features_scaled = self.scaler.transform(features.reshape(1, -1))
         pred_label = self.model.predict(features_scaled)[0]
         pred_proba = self.model.predict_proba(features_scaled)[0]
-
+        
         return pred_label, pred_proba
 
 

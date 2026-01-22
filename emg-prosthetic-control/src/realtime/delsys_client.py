@@ -384,35 +384,23 @@ class DelsysClient:
             return False
                         
     def _parse_channels(self):
-        """
-        Parse channel information after configuration.
-        
-        Uses official API properties:
-        - sensor.TrignoChannels: List of ChannelTrigno objects
-        - channel.Id: GUID for data parsing
-        - channel.Name: Channel name (e.g., "EMG 1")
-        - channel.Type: ChannelTypes enum (EMG, ACC, GYRO, etc.)
-        - channel.IsEnabled: Whether channel is active
-        """
+        """Parse ALL channel information - don't filter anything"""
         self.channel_info = {}
         self.channel_guids = []
         
-        emg_count = 0
-        acc_count = 0
-        gyro_count = 0
+        # Count ALL types
+        type_counts = {}
         
         for sensor_idx, sensor in enumerate(self.sensors):
-            # Get all channels for this sensor
             channels = list(sensor.TrignoChannels)
             
             for channel in channels:
-                # Only use enabled channels
                 if not channel.IsEnabled:
                     continue
                 
-                guid = channel.Id
+                guid = str(channel.Id)  # Convert to string immediately
                 name = channel.Name
-                chan_type = str(channel.Type)  # Convert enum to string
+                chan_type = str(channel.Type)
                 sample_rate = channel.SampleRate
                 unit = str(channel.Unit)
                 
@@ -425,18 +413,16 @@ class DelsysClient:
                     'sensor_index': sensor_idx
                 }
                 
-                # Count by type
-                if 'EMG' in chan_type:
-                    emg_count += 1
-                elif 'ACC' in chan_type:
-                    acc_count += 1
-                elif 'GYRO' in chan_type:
-                    gyro_count += 1
+                # Count ALL types
+                if chan_type not in type_counts:
+                    type_counts[chan_type] = 0
+                type_counts[chan_type] += 1
         
-        print(f"  Channel breakdown:")
-        print(f"    EMG: {emg_count}")
-        print(f"    ACC: {acc_count}")
-        print(f"    GYRO: {gyro_count}")
+        # Print COMPLETE breakdown
+        print(f"  Complete channel breakdown:")
+        for chan_type, count in sorted(type_counts.items()):
+            print(f"    {chan_type}: {count}")
+        print(f"  Total channels: {len(self.channel_guids)}")
     
     def start_streaming(self, yt_data: bool = False) -> bool:
         """
@@ -595,40 +581,66 @@ class DelsysClient:
         """Get total data packets collected"""
         return self.base.GetTotalPackets()
 
+    def describe_packet(self, packet: Dict[str, np.ndarray]) -> None:
+        """
+        Pretty-print a polled data packet with channel metadata.
+        """
+        print(f"\n📦 Packet received ({len(packet)} channels):")
+
+        for guid_str, samples in packet.items():
+            info = self.channel_info.get(guid_str)
+
+            if info is None:
+                print(f"  Unknown channel {guid_str}: {len(samples)} samples")
+                continue
+
+            name = info['name']
+            chan_type = info['type']
+            rate = info['sample_rate']
+            unit = info['unit']
+            sensor_idx = info['sensor_index']
+
+            preview = samples[:5] if len(samples) >= 5 else samples
+
+            print(
+                f"  Sensor {sensor_idx+1} | "
+                f"{name:<8} | {chan_type:<6} | "
+                f"{len(samples):3d} samples @ {rate} Hz | {unit} | "
+                f"preview: {np.round(preview, 4)}"
+            )
 
 def load_credentials(
-    key_file: str = "resources/delsys_key.txt",
-    license_file: str = "resources/delsys_license.lic"
-) -> tuple:
-    """
-    Load Delsys credentials from files.
-    
-    Returns:
-        (key, license) tuple
-    """
-    key_path = Path(key_file)
-    license_path = Path(license_file)
-    
-    if not key_path.exists():
-        raise FileNotFoundError(
-            f"Key file not found: {key_path}\n"
-            f"Create this file with your Delsys API key"
-        )
-    
-    if not license_path.exists():
-        raise FileNotFoundError(
-            f"License file not found: {license_path}\n"
-            f"Create this file with your Delsys license"
-        )
-    
-    key = key_path.read_text().strip()
-    license = license_path.read_text().strip()
-    
-    if not key or not license:
-        raise ValueError("Key or license file is empty")
-    
-    return key, license
-
+        key_file: str = "resources/delsys_key.txt",
+        license_file: str = "resources/delsys_license.lic"
+    ) -> tuple:
+        """
+        Load Delsys credentials from files.
+        
+        Returns:
+            (key, license) tuple
+        """
+        key_path = Path(key_file)
+        license_path = Path(license_file)
+        
+        if not key_path.exists():
+            raise FileNotFoundError(
+                f"Key file not found: {key_path}\n"
+                f"Create this file with your Delsys API key"
+            )
+        
+        if not license_path.exists():
+            raise FileNotFoundError(
+                f"License file not found: {license_path}\n"
+                f"Create this file with your Delsys license"
+            )
+        
+        key = key_path.read_text().strip()
+        license = license_path.read_text().strip()
+        
+        if not key or not license:
+            raise ValueError("Key or license file is empty")
+        
+        return key, license
 
 # Test code
 if __name__ == "__main__":
@@ -685,8 +697,8 @@ if __name__ == "__main__":
                 data = client.poll_data()
                 if data:
                     packets_received += 1
-                    print(f"\r  Packets: {packets_received}, Channels: {len(data)}", 
-                          end='', flush=True)
+                    print(f"\n--- Packet {packets_received} ---")
+                    client.describe_packet(data)
                 time.sleep(1)
             
             print(f"\n✓ Received {packets_received} data packets")
