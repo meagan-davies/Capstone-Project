@@ -8,7 +8,7 @@ Handles:
 """
 
 import numpy as np
-from collections import deque
+from collections import deque, defaultdict
 from threading import Lock
 from typing import Dict, List, Optional
 
@@ -22,6 +22,33 @@ if str(src_path) not in sys.path:
 from features.emg_features import extract_emg_features
 from features.imu_features import extract_imu_features
 
+
+def group_imu_by_sensor(imu_channel_guids: List[str]) -> Dict[str, List[str]]:
+    """
+    Group flat IMU channel list into sensors.
+    Example: ACC-1-X, GYRO-1-Y → sensor '1'
+    """
+    sensor_groups = defaultdict(list)
+    for guid in imu_channel_guids:
+        # Extract sensor ID assuming format TYPE-<sensor_id>-AXIS
+        parts = guid.split('-')
+        if len(parts) >= 3:
+            sensor_id = parts[1]
+            sensor_groups[sensor_id].append(guid)
+    return dict(sensor_groups)
+
+def group_emg_by_sensor(emg_channel_guids: List[str]) -> Dict[str, List[str]]:
+    """
+    Group Galileo EMG channels into sensors.
+    Example: EMG-1-1, EMG-1-2, EMG-1-3, EMG-1-4 → sensor '1'
+    """
+    sensor_groups = defaultdict(list)
+    for guid in emg_channel_guids:
+        parts = guid.split('-')
+        if len(parts) >= 3:
+            sensor_id = parts[1]
+            sensor_groups[sensor_id].append(guid)
+    return dict(sensor_groups)
 
 class RealtimeProcessor:
     """
@@ -40,157 +67,118 @@ class RealtimeProcessor:
         window_sec: float = 0.20,
         overlap_sec: float = 0.10
     ):
-        """
-        Initialize processor.
-        
-        Args:
-            emg_channel_guids: List of EMG channel GUIDs
-            imu_channel_guids: List of IMU channel GUIDs
-            fs_emg: EMG sampling frequency (Hz)
-            fs_imu: IMU sampling frequency (Hz)
-            window_sec: Window duration (seconds)
-            overlap_sec: Window overlap (seconds)
-        """
         self.emg_channel_guids = sorted(emg_channel_guids)
         self.imu_channel_guids = sorted(imu_channel_guids)
-        
         self.fs_emg = fs_emg
         self.fs_imu = fs_imu
-        
         self.window_sec = window_sec
         self.overlap_sec = overlap_sec
         
-        # Calculate buffer sizes
+        # Window sizes and steps
         self.emg_win_size = int(window_sec * fs_emg)
         self.imu_win_size = int(window_sec * fs_imu)
-        
         self.emg_step = int((window_sec - overlap_sec) * fs_emg)
         self.imu_step = int((window_sec - overlap_sec) * fs_imu)
         
-        # Create circular buffers for each channel
-        self.emg_buffers = {
-            guid: deque(maxlen=self.emg_win_size * 2)
-            for guid in emg_channel_guids
-        }
+        # Circular buffers
+        self.emg_buffers = {guid: deque(maxlen=self.emg_win_size*2) for guid in emg_channel_guids}
+        self.imu_buffers = {guid: deque(maxlen=self.imu_win_size*2) for guid in imu_channel_guids}
         
-        self.imu_buffers = {
-            guid: deque(maxlen=self.imu_win_size * 2)
-            for guid in imu_channel_guids
-        }
-        
-        # Sample counters for step tracking
+        # Sample counters
         self.emg_sample_count = 0
         self.imu_sample_count = 0
         
         # Thread safety
         self.lock = Lock()
         
+        # Group IMU channels per sensor (matches training data)
+        self.imu_sensor_map = group_imu_by_sensor(imu_channel_guids)
+
+        # Group EMG channels per Galileo sensor (matches training data)
+        self.emg_sensor_map = group_emg_by_sensor(emg_channel_guids)
+
         print(f"✓ Processor initialized")
-        print(f"  EMG: {len(emg_channel_guids)} channels, {self.emg_win_size} samples/window")
-        print(f"  IMU: {len(imu_channel_guids)} channels, {self.imu_win_size} samples/window")
+        print(f"  EMG: {len(self.emg_sensor_map)} sensors (Galileo), "
+              f"{self.emg_win_size} samples/window per sensor")
+        print(f"  IMU: {len(self.imu_sensor_map)} sensors, {self.imu_win_size} samples/window per sensor")
     
     def add_data(self, data_dict: Dict[str, np.ndarray]):
-        """
-        Add new data samples from Delsys API.
-        
-        Args:
-            data_dict: Dictionary mapping GUIDs to data arrays
-        """
+        """Add new data samples from Delsys API."""
         with self.lock:
             for guid, values in data_dict.items():
-                # Add to appropriate buffer
                 if guid in self.emg_buffers:
-                    for val in values:
-                        self.emg_buffers[guid].append(val)
+                    self.emg_buffers[guid].extend(values)
                     self.emg_sample_count += len(values)
-                
                 elif guid in self.imu_buffers:
-                    for val in values:
-                        self.imu_buffers[guid].append(val)
+                    self.imu_buffers[guid].extend(values)
                     self.imu_sample_count += len(values)
     
     def is_window_ready(self) -> bool:
-        """
-        Check if we have enough data for a new window.
-        
-        Returns:
-            True if ready to extract features
-        """
-        # Check if buffers have enough samples
-        emg_ready = all(
-            len(buf) >= self.emg_win_size 
-            for buf in self.emg_buffers.values()
-        )
-        
-        imu_ready = all(
-            len(buf) >= self.imu_win_size 
-            for buf in self.imu_buffers.values()
-        )
-        
-        # Check if we've moved enough samples for next window
+        """Check if we have enough data for a new window."""
+        emg_ready = all(len(buf) >= self.emg_win_size for buf in self.emg_buffers.values())
+        imu_ready = all(len(buf) >= self.imu_win_size for buf in self.imu_buffers.values())
         emg_step_ready = self.emg_sample_count >= self.emg_step
         imu_step_ready = self.imu_sample_count >= self.imu_step
-        
         return emg_ready and imu_ready and emg_step_ready and imu_step_ready
     
     def extract_window_features(self) -> Optional[np.ndarray]:
-        """
-        Extract features from current window.
-        
-        Uses the SAME feature extraction as training!
-        
-        Returns:
-            Feature vector, or None if window not ready
-        """
+        """Extract features from current window."""
         with self.lock:
             if not self.is_window_ready():
                 return None
             
-            # Get windows from buffers
-            emg_windows = {}
-            for guid in self.emg_channel_guids:
-                buf = self.emg_buffers[guid]
-                emg_windows[guid] = np.array(list(buf)[-self.emg_win_size:])
+            # Get EMG windows
+            emg_windows = {guid: np.array(list(buf)[-self.emg_win_size:])
+                           for guid, buf in self.emg_buffers.items()}
             
-            imu_windows = {}
-            for guid in self.imu_channel_guids:
-                buf = self.imu_buffers[guid]
-                imu_windows[guid] = np.array(list(buf)[-self.imu_win_size:])
+            # Get IMU windows
+            imu_windows = {guid: np.array(list(buf)[-self.imu_win_size:])
+                           for guid, buf in self.imu_buffers.items()}
             
             # Reset step counters
             self.emg_sample_count = 0
             self.imu_sample_count = 0
         
-        # Extract features (outside lock for performance)
+        # Extract features
         features = []
         
-        # EMG features - one per channel
-        for guid in self.emg_channel_guids:
-            signal = emg_windows[guid]
-            emg_feats = extract_emg_features(signal, fs=self.fs_emg)
+        # ======================
+        # EMG features (Galileo stacked — MATCHES TRAINING)
+        # ======================
+        print("🧠 EMG feature sources:")
+        for sensor_id, channels in sorted(self.emg_sensor_map.items()):
+            # Stack EMG channels like training loader
+            sensor_emg = np.column_stack([
+                emg_windows[guid] for guid in sorted(channels)
+            ])  # shape (N, n_channels)
+
+            emg_feats = extract_emg_features(sensor_emg, fs=self.fs_emg)
+
+            print(
+                f"🧠 EMG Sensor {sensor_id}: "
+                f"{len(emg_feats)} features → "
+                f"{np.round(emg_feats, 3)}"
+            )
+
             features.extend(emg_feats)
-        
-        # IMU features - combine all IMU channels
-        if len(imu_windows) > 0:
-            # Stack all IMU channels
-            imu_stacked = np.column_stack([
-                imu_windows[guid] for guid in self.imu_channel_guids
-            ])
-            imu_feats = extract_imu_features(imu_stacked)
-            features.extend(imu_feats)
+
+
+            print(f"  Sensor {sensor_id}: {sensor_emg.shape[1]} EMG channels → 1 feature block")
+
+        # IMU features per sensor
+        for sensor_id, channels in self.imu_sensor_map.items():
+            sensor_data = np.column_stack([imu_windows[guid] for guid in channels])
+            features.extend(extract_imu_features(sensor_data))
+        print(f"✅ IMU sensors used for features: {list(self.imu_sensor_map.keys())}")
         
         return np.array(features)
     
     def get_buffer_status(self) -> Dict:
-        """Get current buffer status (for debugging)"""
+        """Get current buffer status (for debugging)."""
         with self.lock:
             return {
-                'emg_buffer_sizes': {
-                    guid: len(buf) for guid, buf in self.emg_buffers.items()
-                },
-                'imu_buffer_sizes': {
-                    guid: len(buf) for guid, buf in self.imu_buffers.items()
-                },
+                'emg_buffer_sizes': {guid: len(buf) for guid, buf in self.emg_buffers.items()},
+                'imu_buffer_sizes': {guid: len(buf) for guid, buf in self.imu_buffers.items()},
                 'emg_sample_count': self.emg_sample_count,
                 'imu_sample_count': self.imu_sample_count,
                 'window_ready': self.is_window_ready()
@@ -200,27 +188,23 @@ class RealtimeProcessor:
 if __name__ == "__main__":
     print("Testing processor...")
     
-    # Create fake GUIDs
-    emg_guids = [f"emg-{i}" for i in range(4)]
-    imu_guids = [f"imu-{i}" for i in range(24)]
+    # Example fake GUIDs
+    emg_guids = [f"emg-{i}" for i in range(7)]
+    imu_guids = [f"ACC-{i}-{axis}" for i in range(1, 8) for axis in ['X','Y','Z']] + \
+                [f"GYRO-{i}-{axis}" for i in range(1, 8) for axis in ['X','Y','Z']]
     
     processor = RealtimeProcessor(emg_guids, imu_guids)
     
     # Simulate adding data
-    fake_data = {
-        **{guid: np.random.randn(10) for guid in emg_guids},
-        **{guid: np.random.randn(2) for guid in imu_guids}
-    }
+    fake_data = {guid: np.random.randn(10) for guid in emg_guids + imu_guids}
     
-    # Add data until window ready
     for i in range(30):
         processor.add_data(fake_data)
         status = processor.get_buffer_status()
         print(f"Step {i}: Window ready? {status['window_ready']}")
-        
         if status['window_ready']:
-            features = processor.extract_window_features()
-            print(f"✓ Extracted {len(features)} features!")
+            feats = processor.extract_window_features()
+            print(f"✓ Extracted {len(feats)} features!")
             break
     
     print("\n✓ Processor test complete!")
