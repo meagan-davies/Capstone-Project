@@ -1,0 +1,34 @@
+{
+    "timestamp": "2026-01-29T13:29:33.378085",
+    "model_name": "model_test_v1",
+    "model_type": "LinearDiscriminantAnalysis",
+    "n_features": 198,
+    "n_classes": 4,
+    "classes": [
+        0,
+        1,
+        2,
+        3
+    ],
+    "class_names": {
+        "0": "Neutral",
+        "1": "Pinching",
+        "2": "Grasping",
+        "3": "Zipping"
+    },
+    "performance": {
+        "test_accuracy": 0.9644670050761421,
+        "train_accuracy": 0.9701776649746193,
+        "f1_macro": 0.967196563770974,
+        "f1_weighted": 0.9647790865251964
+    },
+    "training_params": {
+        "window_sec": 0.2,
+        "overlap_sec": 0.1,
+        "fs_emg": 1259,
+        "fs_imu": 148,
+        "test_size": 0.2,
+        "scaler_type": "standard",
+        "cv_folds": 5
+    }
+}

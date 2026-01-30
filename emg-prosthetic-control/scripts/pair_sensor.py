@@ -3,7 +3,7 @@
 Pair sensors to the base station
 
 Usage:
-    python scripts/pair_sensors.py
+    python scripts/pair_sensor.py
 """
 
 import sys
