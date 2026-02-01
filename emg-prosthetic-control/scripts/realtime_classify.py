@@ -89,41 +89,10 @@ def main():
         print("✗ Configuration failed")
         client.disconnect()
         exit(1)
-
-    # ✓ Configuration succeeded - NOW run diagnostic
-    print("\n" + "="*70)
-    print("COMPLETE CHANNEL DIAGNOSTIC")
-    print("="*70)
-    print(f"Total channels in hardware: {len(client.channel_info)}")
-
-    # Group by type
-    type_counts = {}
-    for guid, info in client.channel_info.items():
-        chan_type = info['type']
-        if chan_type not in type_counts:
-            type_counts[chan_type] = 0
-        type_counts[chan_type] += 1
-
-    print("\nChannel types:")
-    for chan_type, count in sorted(type_counts.items()):
-        print(f"  {chan_type:20s}: {count}")
-
-    print(f"\nTotal: {sum(type_counts.values())}")
-    print("="*70)
-
-    # PAUSE HERE - Share this output with me!
-    input("\nPress Enter to continue...")
-
     
     # ========== STEP 5: Create Processor ==========
     print("\nStep 5: Setting up data processor...")
-    emg_guids = client.get_emg_channel_guids()
-    imu_guids = client.get_imu_channel_guids()
-    
-    print(f"  EMG channels: {len(emg_guids)}")
-    print(f"  IMU channels: {len(imu_guids)}")
-    
-    processor = RealtimeProcessor(emg_guids, imu_guids)
+    processor = RealtimeProcessor(client)
     
     # ========== STEP 6: Load Classifier ==========
     print("\nStep 6: Loading trained model...")
@@ -156,10 +125,11 @@ def main():
             if data:
                 with packet_lock:
                     latest_packet = data
-                processor.add_data(data)
+                # Use add_raw_data (works with UUID-keyed data)
+                processor.add_raw_data(data)
             time.sleep(0.001)
 
-    
+
     # Start polling thread
     poll_thread = Thread(target=poll_loop, daemon=True)
     poll_thread.start()
@@ -178,20 +148,9 @@ def main():
                     confidence = pred_proba[pred_label] * 100
 
                     prediction_count += 1
+                    print(f"[{prediction_count:4d}] {class_name:12s} ({confidence:5.1f}%)")
 
-                    print(
-                        f"\n[{prediction_count:4d}] {class_name:12s} | "
-                        f"Confidence: {confidence:5.1f}%"
-                    )
-
-                    # 🔍 PRINT RAW DATA THAT PRODUCED THIS WINDOW
-                    with packet_lock:
-                        packet = latest_packet
-
-                    if packet is not None:
-                        client.describe_packet(packet)
-
-            time.sleep(0.5)
+            time.sleep(0.5)  # Check every 50ms
 
     
     except KeyboardInterrupt:
