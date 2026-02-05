@@ -25,7 +25,15 @@ from features.imu_features import extract_imu_features
 def build_channel_maps_from_delsys(delsys_connection):
     """
     Build channel maps using sensor_index from channel_info.
-    Returns EMG and IMU sensor maps and guid-to-name mapping.
+
+    Returns:
+        emg_sensor_map: dict[int, list[uuid]]
+            sensor_idx -> ordered EMG channel UUIDs
+        imu_sensor_map: dict[int, list[uuid]]
+            sensor_idx -> ordered IMU UUIDs:
+            [ACC-X, ACC-Y, ACC-Z, GYRO-X, GYRO-Y, GYRO-Z]
+        guid_to_name: dict[uuid, str]
+            UUID -> human-readable name
     """
     try:
         channel_info = delsys_connection.channel_info
@@ -37,52 +45,77 @@ def build_channel_maps_from_delsys(delsys_connection):
     imu_by_sensor = defaultdict(dict)
     guid_to_name = {}
 
+    IMU_EXPECTED_ORDER = [
+        "ACC-X", "ACC-Y", "ACC-Z",
+        "GYRO-X", "GYRO-Y", "GYRO-Z"
+    ]
+
+    # ----------------------------
+    # Parse raw channel info
+    # ----------------------------
     for guid, info in channel_info.items():
-        name = info['name']
-        chan_type = info['type']
-        sensor_idx = info['sensor_index']
+        name = info.get("name", "")
+        chan_type = info.get("type", "")
+        sensor_idx = info.get("sensor_index", None)
+
+        if sensor_idx is None:
+            continue
 
         guid_to_name[guid] = f"Sensor {sensor_idx} | {name}"
 
-        # EMG
-        if chan_type == 'EMG':
+        # ---------- EMG ----------
+        if chan_type == "EMG":
+            # Try to extract EMG channel number for ordering
             try:
                 ch_num = int(name.split()[-1])
-                emg_by_sensor[sensor_idx].append((ch_num, guid))
             except (ValueError, IndexError):
-                emg_by_sensor[sensor_idx].append((0, guid))
+                ch_num = 0
 
-        # IMU
-        elif chan_type in ['ACC', 'GYRO']:
+            emg_by_sensor[sensor_idx].append((ch_num, guid))
+
+        # ---------- IMU ----------
+        elif chan_type in {"ACC", "GYRO"}:
             try:
                 axis = name.split()[-1].upper()
                 imu_by_sensor[sensor_idx][f"{chan_type}-{axis}"] = guid
             except (ValueError, IndexError):
                 pass
 
-    # Sort EMG channels
-    emg_final = {}
-    for sensor_idx, channels_list in emg_by_sensor.items():
-        sorted_channels = [guid for _, guid in sorted(channels_list)]
-        if len(sorted_channels) in [1, 4]:
-            emg_final[sensor_idx] = sorted_channels
+    # ----------------------------
+    # Finalize EMG map
+    # ----------------------------
+    emg_sensor_map = {}
+    for sensor_idx, ch_list in emg_by_sensor.items():
+        # Sort by channel number
+        sorted_uuids = [guid for _, guid in sorted(ch_list)]
 
-    # Validate IMU sensors
-    imu_final = {}
-    expected = ['ACC-X','ACC-Y','ACC-Z','GYRO-X','GYRO-Y','GYRO-Z']
-    for sensor_idx, ch_dict in imu_by_sensor.items():
-        channel_list = [ch_dict.get(key) for key in expected]
-        if all(ch is not None for ch in channel_list):
-            imu_final[sensor_idx] = channel_list
+        # Accept 1-channel or 4-channel EMG sensors
+        if len(sorted_uuids) in (1, 4):
+            emg_sensor_map[sensor_idx] = sorted_uuids
 
-    print(f"✓ Found {len(emg_final)} EMG sensors, {len(imu_final)} IMU sensors")
-    return emg_final, imu_final, guid_to_name
+    # ----------------------------
+    # Finalize IMU map (ORDERED LIST)
+    # ----------------------------
+    imu_sensor_map = {}
+    for sensor_idx, axis_dict in imu_by_sensor.items():
+        ordered = [axis_dict.get(axis) for axis in IMU_EXPECTED_ORDER]
+
+        # Only accept complete IMUs
+        if all(uuid is not None for uuid in ordered):
+            imu_sensor_map[sensor_idx] = ordered
+
+    print(f"✓ Found {len(emg_sensor_map)} EMG sensors, {len(imu_sensor_map)} IMU sensors")
+
+    return emg_sensor_map, imu_sensor_map, guid_to_name
 
 class RealtimeProcessor:
     def __init__(self, delsys_client, fs_emg=963, fs_imu=148.148, 
                  window_sec=0.20, overlap_sec=0.10,
                  model_path="lda_model.pkl", scaler_path="lda_scaler.pkl"):
+        
         print(f"\nInitializing RealtimeProcessor with model/scaler...")
+
+        self.EXPECTED_FEATURES = 231
 
         self.fs_emg = fs_emg
         self.fs_imu = fs_imu
@@ -98,6 +131,12 @@ class RealtimeProcessor:
         # Build channel maps
         self.emg_sensor_map, self.imu_sensor_map, self.guid_to_name = \
             build_channel_maps_from_delsys(delsys_client)
+        
+        if not self.emg_sensor_map:
+            raise RuntimeError("No EMG sensors detected")
+
+        if not self.imu_sensor_map:
+            raise RuntimeError("No IMU sensors detected")
 
         # Reverse lookup: UUID -> sensor_idx
         self.uuid_to_emg_sensor = {}
@@ -106,9 +145,23 @@ class RealtimeProcessor:
                 self.uuid_to_emg_sensor[uuid] = sensor_idx
 
         # Buffers
-        self.emg_buffers = {s: deque(maxlen=self.emg_win_size*2) for s in self.emg_sensor_map}
-        self.imu_buffers = {uuid: deque(maxlen=self.imu_win_size*2)
-                            for lst in self.imu_sensor_map.values() for uuid in lst}
+        self.emg_channel_order = []
+        for sensor_idx in sorted(self.emg_sensor_map.keys()):
+            self.emg_channel_order.extend(self.emg_sensor_map[sensor_idx])
+
+        self.emg_buffers = {
+            uuid: deque(maxlen=self.emg_win_size * 2)
+            for uuid in self.emg_channel_order
+        }
+
+        self.imu_channel_order = []
+        for sensor_idx in sorted(self.imu_sensor_map.keys()):
+            self.imu_channel_order.extend(self.imu_sensor_map[sensor_idx])
+            
+        self.imu_buffers = {
+            uuid: deque(maxlen=self.imu_win_size * 2)
+            for uuid in self.imu_channel_order
+        }
 
         self.emg_sample_count = 0
         self.imu_sample_count = 0
@@ -117,6 +170,9 @@ class RealtimeProcessor:
         # Load trained model + scaler
         self.clf = joblib.load(model_path)
         self.scaler = joblib.load(scaler_path)
+
+        print("EMG order:", self.emg_channel_order)
+        print("IMU order:", self.imu_channel_order)
 
         print(f"✓ Processor ready with classifier '{type(self.clf).__name__}'\n")
 
@@ -127,9 +183,8 @@ class RealtimeProcessor:
                 data = np.atleast_1d(raw)
 
                 # EMG
-                if uuid in self.uuid_to_emg_sensor:
-                    sensor_idx = self.uuid_to_emg_sensor[uuid]
-                    self.emg_buffers[sensor_idx].extend(data)
+                if uuid in self.emg_buffers:
+                    self.emg_buffers[uuid].extend(data)
                     self.emg_sample_count += len(data)
 
                 # IMU (UUID-keyed ONLY)
@@ -163,37 +218,40 @@ class RealtimeProcessor:
             features = []
 
             # EMG
-            for sensor_idx in sorted(self.emg_sensor_map.keys()):
-                buf = self.emg_buffers[sensor_idx]
-                window = np.array(list(buf)[-self.emg_win_size:])
+            for uuid in self.emg_channel_order:
+                buf = self.emg_buffers[uuid]
+                window = np.array(buf)[-self.emg_win_size:]
 
-                # Safe handling for 1D vs 2D arrays
-                if window.ndim == 1:
-                    emg_feats = extract_emg_features(window, fs=self.fs_emg)
-                else:
-                    emg_feats = extract_emg_features(window, fs=self.fs_emg)
-
+                emg_feats = extract_emg_features(window, fs=self.fs_emg)
                 features.extend(emg_feats)
 
             # IMU
-            imu_data = [
-                np.array(buf)[-self.imu_win_size:]
-                for buf in self.imu_buffers.values()
-            ]
+            imu_data = []
+            for uuid in self.imu_channel_order:
+                buf = self.imu_buffers[uuid]
+                imu_data.append(np.array(buf)[-self.imu_win_size:])
 
             sensor_data = np.column_stack(imu_data)
             imu_feats = extract_imu_features(sensor_data)
             features.extend(imu_feats)
 
             features_array = np.array(features).reshape(1, -1)
+
+            if features_array.shape[1] != self.EXPECTED_FEATURES:
+
+                raise RuntimeError(
+                    f"Feature count mismatch: got {features_array.shape[1]}, "
+                    f"expected {self.EXPECTED_FEATURES}"
+                )
+
             features_scaled = self.scaler.transform(features_array)
 
             # Slide buffers after extraction
-            for sensor_idx in self.emg_sensor_map:
-                buf = self.emg_buffers[sensor_idx]
+            for uuid in self.emg_channel_order:
+                buf = self.emg_buffers[uuid]
                 for _ in range(min(self.emg_step, len(buf))):
                     buf.popleft()
-                self.emg_sample_count = max(self.emg_sample_count - self.emg_step, 0)
+            self.emg_sample_count = max(self.emg_sample_count - self.emg_step, 0)
 
             for buf in self.imu_buffers.values():
                 for _ in range(min(self.imu_step, len(buf))):
