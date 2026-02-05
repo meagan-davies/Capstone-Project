@@ -89,28 +89,56 @@ def main():
         print("✗ Configuration failed")
         client.disconnect()
         exit(1)
+
+    # ✓ Configuration succeeded - NOW run diagnostic
+    print("\n" + "="*70)
+    print("COMPLETE CHANNEL DIAGNOSTIC")
+    print("="*70)
+    print(f"Total channels in hardware: {len(client.channel_info)}")
+
+    # Group by type
+    type_counts = {}
+    for guid, info in client.channel_info.items():
+        chan_type = info['type']
+        if chan_type not in type_counts:
+            type_counts[chan_type] = 0
+        type_counts[chan_type] += 1
+
+    print("\nChannel types:")
+    for chan_type, count in sorted(type_counts.items()):
+        print(f"  {chan_type:20s}: {count}")
+
+    print(f"\nTotal: {sum(type_counts.values())}")
+    print("="*70)
+
+    # PAUSE HERE - Share this output with me!
+    input("\nPress Enter to continue...")
+
     
     # ========== STEP 5: Create Processor ==========
     print("\nStep 5: Setting up data processor...")
-    processor = RealtimeProcessor(client)
-    
-    # ========== STEP 6: Load Classifier ==========
-    print("\nStep 6: Loading trained model...")
-    classifier = RealtimeClassifier(model_path, scaler_path)
-    
-    # ========== STEP 7: Start Streaming ==========
-    print("\nStep 7: Starting data stream...")
+
+    processor = RealtimeProcessor(
+        delsys_client=client,          # Delsys client object
+        model_path=model_path,         # trained model .pkl
+        scaler_path=scaler_path,       # scaler .pkl
+        fs_emg=963,
+        fs_imu=148.148,
+        window_sec=0.2,
+        overlap_sec=0.1
+    )
+
+    print(f"  EMG channels: {len(processor.emg_channel_order)}")
+    print(f"  IMU channels: {len(processor.imu_channel_order)}")
+
+    # ========== STEP 6: Start Streaming ==========
+    print("\nStep 6: Starting data stream...")
     if not client.start_streaming():
         print("✗ Failed to start streaming")
         client.disconnect()
         exit(1)
-    
-    # ========== STEP 8: Real-Time Loop ==========
-    print("\n" + "="*70)
-    print("REAL-TIME CLASSIFICATION ACTIVE")
-    print("="*70)
-    print("Press Ctrl+C to stop\n")
-    
+
+    # ========== STEP 7: Real-Time Polling Thread ==========
     is_running = True
     from threading import Lock
 
@@ -118,51 +146,57 @@ def main():
     packet_lock = Lock()
 
     def poll_loop():
-        """Background thread to continuously poll data"""
+        """Continuously poll data from Delsys client and push to processor"""
         nonlocal latest_packet
         while is_running:
-            data = client.poll_data()
-            if data:
+            packet = client.poll_data()
+            if packet:
                 with packet_lock:
-                    latest_packet = data
-                # Use add_raw_data (works with UUID-keyed data)
-                processor.add_raw_data(data)
-            time.sleep(0.001)
-
+                    latest_packet = packet
+                processor.add_raw_data(packet)  # ✅ correct method
+            time.sleep(0.001)  # small sleep to prevent CPU spin
 
     # Start polling thread
+    from threading import Thread
     poll_thread = Thread(target=poll_loop, daemon=True)
     poll_thread.start()
-    
-    # Main classification loop
+
+    # ========== STEP 8: Main Real-Time Loop ==========
+    print("\n" + "="*70)
+    print("REAL-TIME CLASSIFICATION ACTIVE")
+    print("="*70)
+    print("Press Ctrl+C to stop\n")
+
+    prediction_count = 0
+
     try:
-        prediction_count = 0
-        
         while True:
             if processor.is_window_ready():
-                features = processor.extract_window_features()
-
-                if features is not None:
-                    pred_label, pred_proba = classifier.predict(features)
-                    class_name = classifier.get_class_name(pred_label)
-                    confidence = pred_proba[pred_label] * 100
-
+                result = processor.predict()
+                if result is not None:
+                    pred_class, pred_probs, class_name = result
+                    confidence = pred_probs[pred_class] * 100
                     prediction_count += 1
-                    print(f"[{prediction_count:4d}] {class_name:12s} ({confidence:5.1f}%)")
 
-            time.sleep(0.5)  # Check every 50ms
+                    print(f"\n[{prediction_count:4d}] {class_name:12s} | Confidence: {confidence:5.1f}%")
 
-    
+                    # Optional: print raw packet that produced this window
+                    with packet_lock:
+                        packet = latest_packet
+                    if packet is not None:
+                        client.describe_packet(packet)
+
+            time.sleep(0.05)  # adjust for responsiveness
+
     except KeyboardInterrupt:
-        print("\n\nStopping...")
+        print("\n\nStopping real-time classification...")
         is_running = False
-    
+
     # ========== CLEANUP ==========
     print("\nCleaning up...")
     poll_thread.join(timeout=1)
     client.stop_streaming()
     client.disconnect()
-    
     print(f"\n✓ Session complete: {prediction_count} predictions made")
     print("="*70)
 
