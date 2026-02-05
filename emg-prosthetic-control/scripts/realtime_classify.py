@@ -181,12 +181,12 @@ def main():
                     print(f"\n[{prediction_count:4d}] {class_name:12s} | Confidence: {confidence:5.1f}%")
 
                     # Optional: print raw packet that produced this window
-                    with packet_lock:
-                        packet = latest_packet
-                    if packet is not None:
-                        client.describe_packet(packet)
+                    # with packet_lock:
+                    #     packet = latest_packet
+                    # if packet is not None:
+                    #     client.describe_packet(packet)
 
-            time.sleep(0.05)  # adjust for responsiveness
+            time.sleep(0.5)  # adjust for responsiveness
 
     except KeyboardInterrupt:
         print("\n\nStopping real-time classification...")
