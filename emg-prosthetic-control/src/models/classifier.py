@@ -28,9 +28,9 @@ from sklearn.utils.class_weight import compute_class_weight
 def prepare_data(
     X: np.ndarray,
     y: np.ndarray,
-    test_size: float = 0.2,
+    test_size: float = 0.3,
     random_state: int = 42,
-    scaler_type: str = 'standard',
+    scaler_type: str = 'robust',
     balance_classes: bool = False
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, object, Optional[Dict]]:
     """
@@ -72,15 +72,12 @@ def prepare_data(
     # Select scaler based on type
     if scaler_type == 'standard':
         # Z-score normalization: (x - mean) / std
-        # Best for normally distributed data
         scaler = StandardScaler()
     elif scaler_type == 'robust':
         # Uses median and IQR: (x - median) / IQR
-        # Less sensitive to outliers (recommended for EMG!)
         scaler = RobustScaler()
     elif scaler_type == 'minmax':
         # Scales to [0, 1]: (x - min) / (max - min)
-        # Good when you know the range
         scaler = MinMaxScaler()
     else:
         raise ValueError(f"Unknown scaler type: {scaler_type}")
@@ -103,7 +100,7 @@ def prepare_data(
 def train_lda_classifier(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    scaler_type: str = 'standard',
+    scaler_type: str = 'robust',
     use_cv: bool = True,
     cv_folds: int = 5,
     verbose: bool = True
@@ -266,8 +263,8 @@ def evaluate_classifier(
 def train_and_evaluate(
     X: np.ndarray,
     y: np.ndarray,
-    test_size: float = 0.2,
-    scaler_type: str = 'standard',
+    test_size: float = 0.3,
+    scaler_type: str = 'robust',
     use_cv: bool = True,
     cv_folds: int = 5,
     class_names: Optional[List[str]] = None,

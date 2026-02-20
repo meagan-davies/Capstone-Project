@@ -10,6 +10,8 @@ import argparse
 import sys
 import os
 from pathlib import Path
+from threading import Thread, Lock
+import time
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -18,8 +20,6 @@ sys.path.insert(0, str(project_root))
 from src.realtime.delsys_client import DelsysClient, load_credentials
 from src.realtime.processor import RealtimeProcessor
 from src.realtime.classifier import RealtimeClassifier
-import time
-from threading import Thread
 
 
 def parse_args():
@@ -100,9 +100,7 @@ def main():
     type_counts = {}
     for guid, info in client.channel_info.items():
         chan_type = info['type']
-        if chan_type not in type_counts:
-            type_counts[chan_type] = 0
-        type_counts[chan_type] += 1
+        type_counts[chan_type] = type_counts.get(chan_type, 0) + 1
 
     print("\nChannel types:")
     for chan_type, count in sorted(type_counts.items()):
@@ -140,7 +138,6 @@ def main():
 
     # ========== STEP 7: Real-Time Polling Thread ==========
     is_running = True
-    from threading import Lock
 
     latest_packet = None
     packet_lock = Lock()
@@ -157,7 +154,6 @@ def main():
             time.sleep(0.001)  # small sleep to prevent CPU spin
 
     # Start polling thread
-    from threading import Thread
     poll_thread = Thread(target=poll_loop, daemon=True)
     poll_thread.start()
 

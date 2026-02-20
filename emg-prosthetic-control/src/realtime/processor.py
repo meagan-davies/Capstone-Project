@@ -50,29 +50,29 @@ def build_channel_maps_from_delsys(delsys_connection):
     ]
 
     for guid, info in channel_info.items():
-        name = info.get("name", "")
-        chan_type = info.get("type", "")
-        sensor_idx = info.get("sensor_index")
+        name = info["name"]
+        chan_type = info["type"]
+        sensor_idx = info["sensor_index"]
 
         if sensor_idx is None:
+            print(f"Warning: sensor_idx is None: {info}")
             continue
 
         guid_to_name[guid] = f"Sensor {sensor_idx} | {name}"
 
         if chan_type == "EMG":
-            try:
-                ch_num = int(name.split()[-1])
-            except (ValueError, IndexError):
-                ch_num = 0
+            # TODO: Write a conditional for any specific cases where this fails.
+            ch_num = int(name.split()[-1])
             emg_by_sensor[sensor_idx].append((ch_num, guid))
 
         elif chan_type in {"ACC", "GYRO"}:
-            try:
-                axis = name.split()[-1].upper()
-                imu_by_sensor[sensor_idx][f"{chan_type}-{axis}"] = guid
-            except (ValueError, IndexError):
-                pass
-
+            # TODO: Write a conditional for any specific cases where this fails.
+            axis = name.split()[-1].upper()
+            imu_by_sensor[sensor_idx][f"{chan_type}-{axis}"] = guid
+        
+        else:
+            print(f"Ignoring channel chan_type={chan_type}: {info}")
+            
     emg_sensor_map = {}
     for sensor_idx, ch_list in emg_by_sensor.items():
         sorted_uuids = [guid for _, guid in sorted(ch_list)]
@@ -152,10 +152,12 @@ class RealtimeProcessor:
         print(f"✓ Processor ready ({self.expected_features} features expected)\n")
 
     def _build_channel_order(self):
+        # TODO: Figure out what this is doing and confirm it's right.
         self.emg_channel_order = [guid for idx in sorted(self.emg_sensor_map.keys()) for guid in self.emg_sensor_map[idx]]
         self.imu_channel_order = [guid for idx in sorted(self.imu_sensor_map.keys()) for guid in self.imu_sensor_map[idx]]
 
     def _get_sensor_index(self, uuid):
+        # FIXME: Do not use try-except here.
         name = self.guid_to_name.get(uuid, "")
         try:
             return int(name.split()[1])
