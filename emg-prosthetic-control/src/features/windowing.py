@@ -2,92 +2,117 @@ import numpy as np
 from .emg_features import extract_emg_features
 from .imu_features import extract_imu_features
 
-def window_and_extract_features(emg_dict, imu_dict, fs_emg, fs_imu, window_sec, overlap_sec, include_partial=True):
+
+def window_and_extract_features(
+    emg_dict,
+    imu_dict,
+    emg_fs_map,
+    fs_imu,
+    window_sec,
+    overlap_sec,
+    include_partial=True
+):
     """
-    Window EMG and IMU data separately (accounting for different sampling rates)
-    and extract features from aligned windows.
+    Window EMG and IMU data and extract features.
+    Each EMG sensor uses its own sampling rate from emg_fs_map.
 
     Parameters
     ----------
     emg_dict : dict
-        Keys = sensor names, Values = 1D np.array of EMG signals
+        {sensor_name: np.ndarray}  EMG data per sensor
     imu_dict : dict
-        Keys = sensor names, Values = np.array of IMU signals (NxM)
-    fs_emg : float
-        EMG sampling frequency
+        {sensor_name: np.ndarray}  IMU data per sensor
+    emg_fs_map : dict
+        {sensor_name: float}  Per-sensor EMG sampling rate (from CSV header)
     fs_imu : float
-        IMU sampling frequency
+        IMU sampling frequency (shared across all IMU sensors)
     window_sec : float
         Window duration in seconds
     overlap_sec : float
         Window overlap in seconds
     include_partial : bool
-        If True, include final partial window for sensors
+        Include final partial window if data doesn't divide evenly
 
     Returns
     -------
     np.ndarray
-        Array of shape (n_windows, n_features)
+        Shape (n_windows, n_features)
     """
 
-    # Calculate window sizes and steps
-    emg_win_size = int(window_sec * fs_emg)
-    emg_step = max(1, int((window_sec - overlap_sec) * fs_emg))
-
-    imu_win_size = int(window_sec * fs_imu)
-    imu_step = max(1, int((window_sec - overlap_sec) * fs_imu))
-
-    all_features = []
-
-    # Sort sensors for consistent ordering
     emg_sensors = sorted(emg_dict.keys())
     imu_sensors = sorted(imu_dict.keys())
 
-    # Determine number of windows per sensor
+    # Per-sensor EMG window sizes and steps
+    emg_win_sizes = {
+        s: int(window_sec * emg_fs_map[s]) for s in emg_sensors
+    }
+    emg_steps = {
+        s: max(1, int((window_sec - overlap_sec) * emg_fs_map[s])) for s in emg_sensors
+    }
+
+    # Shared IMU window size and step
+    imu_win_size = int(window_sec * fs_imu)
+    imu_step = max(1, int((window_sec - overlap_sec) * fs_imu))
+
     def calc_n_windows(data_len, win_size, step):
         if data_len < win_size:
             return 1 if include_partial else 0
         return ((data_len - win_size) // step) + 1
 
-    emg_n_windows = [calc_n_windows(len(emg_dict[s]), emg_win_size, emg_step) 
-                     for s in emg_sensors]
-    imu_n_windows = [calc_n_windows(len(imu_dict[s]), imu_win_size, imu_step) 
-                     for s in imu_sensors]
+    emg_n_windows = [
+        calc_n_windows(len(emg_dict[s]), emg_win_sizes[s], emg_steps[s])
+        for s in emg_sensors
+    ]
+    imu_n_windows = [
+        calc_n_windows(len(imu_dict[s]), imu_win_size, imu_step)
+        for s in imu_sensors
+    ]
 
     n_windows = min(emg_n_windows + imu_n_windows)
     if n_windows == 0:
-        raise ValueError("No windows could be created. Check window/overlap parameters or data length.")
+        raise ValueError(
+            "No windows could be created. Check window/overlap parameters or data length."
+        )
 
-    # Extract features window by window
+    all_features = []
+
     for win_idx in range(n_windows):
         window_features = []
 
-        # EMG features
+        # --- EMG features (per-sensor fs) ---
         for sensor in emg_sensors:
-            start = win_idx * emg_step
-            end = start + emg_win_size
-            if end > len(emg_dict[sensor]):
-                if include_partial:
-                    window = emg_dict[sensor][start:]
-                else:
-                    continue
-            else:
-                window = emg_dict[sensor][start:end]
+            fs      = emg_fs_map[sensor]
+            win_size = emg_win_sizes[sensor]
+            step    = emg_steps[sensor]
+            data    = emg_dict[sensor]
 
-            feats = extract_emg_features(window, fs_emg)
+            start = win_idx * step
+            end   = start + win_size
+
+            if end > len(data):
+                window = data[start:] if include_partial else None
+            else:
+                window = data[start:end]
+
+            if window is None or len(window) == 0:
+                continue
+
+            feats = extract_emg_features(window, fs)   # correct fs per sensor
             window_features.extend(feats)
 
-        # IMU features
+        # --- IMU features (shared fs) ---
         for sensor in imu_sensors:
+            data  = imu_dict[sensor]
             start = win_idx * imu_step
-            end = start + imu_win_size
-            if end > len(imu_dict[sensor]):
-                if include_partial:
-                    window = imu_dict[sensor][start:]
-                else:
-                    continue
+            end   = start + imu_win_size
+
+            if end > len(data):
+                window = data[start:] if include_partial else None
             else:
-                window = imu_dict[sensor][start:end]
+                window = data[start:end]
+
+            if window is None or len(window) == 0:
+                continue
 
             feats = extract_imu_features(window)
             window_features.extend(feats)
