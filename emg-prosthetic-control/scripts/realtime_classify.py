@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
-Real-Time EMG Classification Script - Refactored
+Real-Time EMG Classification Script - Sensor-Based (Updated)
 
 Usage:
-    python scripts/realtime_classify.py --model-name model_latest
+    python scripts/realtime_classify.py --model-name model_latest_v1
 """
 
 import argparse
@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 from threading import Thread, Lock
+from collections import defaultdict
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -22,33 +23,18 @@ from src.realtime.processor import RealtimeProcessor
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Real-time EMG classification")
-    parser.add_argument('--model-name', type=str, default='model_latest', help='Saved model folder name')
-    parser.add_argument('--model-dir', type=str, default='models/', help='Directory containing saved models')
-    parser.add_argument('--window-sec', type=float, default=0.2, help='Sliding window size in seconds')
+    parser.add_argument('--model-name', type=str, default='model_latest_v1', help='Model bundle folder name')
+    parser.add_argument('--window-sec', type=float, default=0.206, help='Sliding window size in seconds')
     parser.add_argument('--overlap-sec', type=float, default=0.1, help='Sliding window overlap in seconds')
     parser.add_argument('--fs-emg', type=float, default=963.0, help='EMG sampling frequency (Hz)')
     parser.add_argument('--fs-imu', type=float, default=148.148, help='IMU sampling frequency (Hz)')
-    parser.add_argument('--skip-diagnostics', action='store_true', help='Skip the channel diagnostic pause')
+    parser.add_argument('--skip-diagnostics', action='store_true', help='Skip channel diagnostic pause')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose debug output from processor')
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-
-    # Construct model paths
-    model_dir = Path(args.model_dir) / args.model_name
-    model_path = model_dir / "trained_model.pkl"
-    scaler_path = model_dir / "scaler.pkl"
-
-    if not model_path.exists() or not scaler_path.exists():
-        print(f"✗ Model or scaler not found in {model_dir}")
-        if model_dir.exists():
-            print("Available models:")
-            for item in sorted(model_dir.parent.iterdir()):
-                if item.is_dir():
-                    print(f"  - {item.name}")
-        sys.exit(1)
 
     print("="*70)
     print("REAL-TIME EMG CLASSIFICATION")
@@ -84,40 +70,41 @@ def main():
         client.disconnect()
         sys.exit(1)
 
-    # Channel diagnostic (optional pause)
+    # Channel diagnostic
     print("\n" + "="*70)
     print("CHANNEL DIAGNOSTIC")
     print("="*70)
-    print(f"Total channels in hardware: {len(client.channel_info)}")
-    type_counts = {}
+    type_counts = defaultdict(int)
     for info in client.channel_info.values():
         chan_type = info['type']
-        type_counts[chan_type] = type_counts.get(chan_type, 0) + 1
-    print("\nChannel types:")
+        type_counts[chan_type] += 1
     for chan_type, count in sorted(type_counts.items()):
         print(f"  {chan_type:20s}: {count}")
-    print(f"\nTotal channels: {sum(type_counts.values())}")
+    print(f"  Total channels: {sum(type_counts.values())}")
     print("="*70)
-
     if not args.skip_diagnostics:
         input("\nPress Enter to continue...")
 
-    # Step 5: Create processor
+    # Step 5: Initialize processor
     print("\nStep 5: Setting up data processor...")
-    processor = RealtimeProcessor(
-        delsys_client=client,
-        model_path=str(model_path),
-        scaler_path=str(scaler_path),
-        fs_emg=args.fs_emg,
-        fs_imu=args.fs_imu,
-        window_sec=args.window_sec,
-        overlap_sec=args.overlap_sec,
-        validate_features=True,
-    )
+    model_path = Path("models") / args.model_name
+    try:
+        processor = RealtimeProcessor(
+            delsys_client=client,
+            model_path=model_path,
+            fs_emg=args.fs_emg,
+            fs_imu=args.fs_imu,
+            window_sec=args.window_sec,
+            overlap_sec=args.overlap_sec
+        )
+    except Exception as e:
+        print(f"✗ Failed to initialize processor: {e}")
+        client.disconnect()
+        sys.exit(1)
 
     print(f"✓ Processor ready")
-    print(f"  EMG channels: {len(processor.emg_channel_order)}")
-    print(f"  IMU channels: {len(processor.imu_channel_order)}")
+    print(f"  EMG sensors: {len(processor.emg_sensor_map)} ({len(processor.emg_channel_order)} channels)")
+    print(f"  IMU sensors: {len(processor.imu_sensor_map)} ({len(processor.imu_channel_order)} channels)")
 
     # Step 6: Start streaming
     print("\nStep 6: Starting data stream...")
@@ -158,12 +145,10 @@ def main():
                 pred_class, pred_probs, class_name = result
                 confidence = pred_probs[pred_class] * 100
                 prediction_count += 1
-
                 print(f"[{prediction_count:4d}] {class_name:12s} | Confidence: {confidence:5.1f}%")
                 if args.verbose:
-                    status = processor.get_buffer_status()
-                    print(f"  Buffer status: {status}")
-
+                    buf_status = processor.get_buffer_status()
+                    print(f"  Buffers -> EMG: {buf_status['emg_buffer_fill']}, IMU: {buf_status['imu_buffer_fill']}, Window ready: {buf_status['window_ready']}")
             time.sleep(0.5)
 
     except KeyboardInterrupt:
