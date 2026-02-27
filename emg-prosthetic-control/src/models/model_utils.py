@@ -1,430 +1,214 @@
 """
-Model Utilities Module
+Model Utilities
 
-Functions for:
-- Saving trained models with metadata
-- Loading models for inference
-- Model versioning and management
+Handles:
+- Saving model bundles
+- Loading model bundles
+- Model versioning
+- Metadata management
 """
 
-import os
-import pickle
+from __future__ import annotations
+
 import json
+import pickle
+import numpy as np
 from datetime import datetime
-from typing import Dict, Optional, Any
 from pathlib import Path
+from typing import Dict, Any, Optional, List
+
+from .classifier import ModelBundle
 
 
-def save_model_package(
-    clf: object,
-    scaler: object,
-    model_dir: str = "models/saved_models",
-    model_name: Optional[str] = None,
-    class_names: Optional[Dict[int, str]] = None,
-    results: Optional[Dict] = None,
-    config: Optional[Dict] = None
-) -> str:
+# Constants
+DEFAULT_MODEL_DIR = Path("models/saved_models")
+BUNDLE_FILENAME = "model_bundle.pkl"
+METADATA_FILENAME = "metadata.json"
+
+# Make objects JSON serializable
+def _make_json_serializable(obj):
     """
-    Save trained model, scaler, and metadata as a complete package.
-    
-    This is your save_model_and_scaler() function from the notebook,
-    but enhanced with more metadata and better organization.
-    
-    Args:
-        clf: Trained classifier (e.g., LDA)
-        scaler: Fitted scaler (e.g., StandardScaler)
-        model_dir: Base directory for saving models
-        model_name: Name for this model (auto-generated if None)
-        class_names: Dictionary mapping class IDs to names
-        results: Dictionary of evaluation results
-        config: Dictionary of training configuration
-        
-    Returns:
-        Full path to saved model directory
-        
-    Example:
-        >>> save_path = save_model_package(
-        ...     clf, scaler,
-        ...     model_name="production_v1",
-        ...     class_names={0: "Neutral", 1: "Pinching"},
-        ...     results={'accuracy': 0.87}
-        ... )
-        >>> print(f"Model saved to: {save_path}")
+    Convert numpy types to native Python types
+    so they can be saved in JSON metadata.
     """
-    # Create models directory if it doesn't exist
-    os.makedirs(model_dir, exist_ok=True)
-    
-    # Generate model name if not provided
+
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+
+    if isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+
+    if isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [_make_json_serializable(v) for v in obj]
+
+    return obj
+
+# Save Function
+def save_model_bundle(bundle: ModelBundle, metrics: Dict[str, Any], model_name: Optional[str] = None, model_dir: Path | str = DEFAULT_MODEL_DIR) -> Path:
+    """
+    Save a trained ModelBundle with metadata.
+    """
+
+    model_dir = Path(model_dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
+
     if model_name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = f"model_{timestamp}"
-    
-    # Create subfolder for this model
-    save_path = os.path.join(model_dir, model_name)
-    os.makedirs(save_path, exist_ok=True)
-    
-    print(f"\nSaving model package to: {save_path}")
-    
-    # 1. Save the trained model
-    model_file = os.path.join(save_path, "trained_model.pkl")
-    with open(model_file, 'wb') as f:
-        pickle.dump(clf, f)
-    print(f"  ✓ Model saved: trained_model.pkl")
-    
-    # 2. Save the scaler
-    scaler_file = os.path.join(save_path, "scaler.pkl")
-    with open(scaler_file, 'wb') as f:
-        pickle.dump(scaler, f)
-    print(f"  ✓ Scaler saved: scaler.pkl")
-    
-    # 3. Save comprehensive metadata
+
+    save_path = model_dir / model_name
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Extract classifier type
+    clf = bundle.pipeline.named_steps["clf"]
+    model_type = type(clf).__name__
+
+    # Convert metrics to JSON-safe format
+    safe_metrics = _make_json_serializable(metrics)
+
     metadata = {
-        'timestamp': datetime.now().isoformat(),
-        'model_name': model_name,
-        'model_type': type(clf).__name__,
-        'scaler_type': type(scaler).__name__,
+        "model_name": model_name,
+        "timestamp": datetime.now().isoformat(),
+        "model_type": model_type,
+        "scaler_type": bundle.scaler_type,
+        "feature_count": bundle.feature_count,
+        "n_classes": bundle.n_classes,
+        "results": safe_metrics,
     }
-    
-    # Add model-specific info
-    if hasattr(clf, 'coef_'):
-        metadata['n_features'] = clf.coef_.shape[1]
-    if hasattr(clf, 'classes_'):
-        metadata['n_classes'] = len(clf.classes_)
-        metadata['class_ids'] = clf.classes_.tolist()
-    
-    # Add class names
-    if class_names:
-        metadata['class_names'] = class_names
-    else:
-        # Default class names
-        metadata['class_names'] = {
-            0: "Neutral",
-            1: "Pinching",
-            2: "Grasping",
-            3: "Zipping"
-        }
-    
-    # Add evaluation results
-    if results:
-        metadata['results'] = {
-            'accuracy': float(results.get('accuracy', 0)),
-            'f1_macro': float(results.get('f1_macro', 0)),
-            'f1_weighted': float(results.get('f1_weighted', 0)),
-        }
-        if 'train_accuracy' in results:
-            metadata['results']['train_accuracy'] = float(results['train_accuracy'])
-    
-    # Add training configuration
-    if config:
-        metadata['config'] = config
-    
-    metadata_file = os.path.join(save_path, "metadata.json")
-    with open(metadata_file, 'w') as f:
+
+    # Save bundle (pickle handles numpy fine)
+    bundle_file = save_path / BUNDLE_FILENAME
+    with open(bundle_file, "wb") as f:
+        pickle.dump(bundle, f)
+
+    # Save metadata (JSON-safe)
+    metadata_file = save_path / METADATA_FILENAME
+    with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=4)
-    print(f"  ✓ Metadata saved: metadata.json")
-    
-    # 4. Create a human-readable README
-    readme_content = generate_model_readme(metadata, results)
-    readme_file = os.path.join(save_path, "README.md")
-    with open(readme_file, 'w', encoding='utf-8') as f:
-        f.write(readme_content)
-    print(f"  ✓ README saved: README.md")
-    
-    # 5. Save confusion matrix if available
-    if results and 'confusion_matrix' in results:
-        import numpy as np
-        cm_file = os.path.join(save_path, "confusion_matrix.txt")
-        np.savetxt(cm_file, results['confusion_matrix'], fmt='%d')
-        print(f"  ✓ Confusion matrix saved: confusion_matrix.txt")
-    
-    print(f"\n{'='*60}")
-    print("MODEL PACKAGE SAVED SUCCESSFULLY")
-    print(f"{'='*60}")
+
+    # Logging
+    print("\n" + "=" * 60)
+    print("MODEL SAVED")
+    print("=" * 60)
+
     print(f"Location: {save_path}")
-    print(f"Model name: '{model_name}'")
-    
-    if results:
-        print(f"\nPerformance:")
-        print(f"  Accuracy: {results.get('accuracy', 0):.2%}")
-        print(f"  F1 Score: {results.get('f1_macro', 0):.4f}")
-    
+    print(f"Model: {model_type}")
+    print(f"Scaler: {bundle.scaler_type}")
+
+    acc = metrics.get("test_accuracy")
+    if acc is not None:
+        print(f"Test Accuracy: {float(acc):.2%}")
+
+    print("=" * 60 + "\n")
+
     return save_path
 
+# Load Function
+def load_model_bundle(model_name: str | Path, model_dir: Path | str = DEFAULT_MODEL_DIR) -> ModelBundle:
+    """
+    Load ModelBundle from disk.
+    """
 
-def load_model_package(
-    model_name: str,
-    model_dir: str = "models/saved_models"
-) -> Dict[str, Any]:
-    """
-    Load a complete model package (model + scaler + metadata).
-    
-    Args:
-        model_name: Name of the model to load
-        model_dir: Base directory containing models
-        
-    Returns:
-        Dictionary containing:
-            - 'model': The trained classifier
-            - 'scaler': The fitted scaler
-            - 'metadata': Model metadata dictionary
-            
-    Example:
-        >>> package = load_model_package("production_v1")
-        >>> clf = package['model']
-        >>> scaler = package['scaler']
-        >>> print(f"Model type: {package['metadata']['model_type']}")
-    """
-    model_path = os.path.join(model_dir, model_name)
-    
-    if not os.path.exists(model_path):
+    model_dir = Path(model_dir)
+    model_path = Path(model_name)
+
+    if not model_path.exists():
+        model_path = model_dir / model_name
+
+    if not model_path.exists():
         raise FileNotFoundError(
-            f"Model not found: {model_path}\n"
+            f"Model not found: {model_name}\n"
             f"Available models: {list_available_models(model_dir)}"
         )
-    
-    # Load model
-    model_file = os.path.join(model_path, "trained_model.pkl")
-    with open(model_file, 'rb') as f:
-        model = pickle.load(f)
-    
-    # Load scaler
-    scaler_file = os.path.join(model_path, "scaler.pkl")
-    with open(scaler_file, 'rb') as f:
-        scaler = pickle.load(f)
-    
-    # Load metadata
-    metadata_file = os.path.join(model_path, "metadata.json")
-    if os.path.exists(metadata_file):
-        with open(metadata_file, 'r') as f:
-            metadata = json.load(f)
-    else:
-        metadata = {}
-    
-    print(f"✓ Loaded model: {model_name}")
-    print(f"  Model type: {type(model).__name__}")
-    print(f"  Scaler type: {type(scaler).__name__}")
-    if metadata:
-        print(f"  Created: {metadata.get('timestamp', 'Unknown')}")
-        if 'results' in metadata:
-            print(f"  Accuracy: {metadata['results'].get('accuracy', 0):.2%}")
-    
-    return {
-        'model': model,
-        'scaler': scaler,
-        'metadata': metadata
-    }
 
+    bundle_file = model_path / BUNDLE_FILENAME
 
-def list_available_models(model_dir: str = "models/saved_models") -> list:
-    """
-    List all available saved models.
-    
-    Args:
-        model_dir: Directory containing saved models
-        
-    Returns:
-        List of model names
-        
-    Example:
-        >>> models = list_available_models()
-        >>> print(f"Available models: {models}")
-    """
-    if not os.path.exists(model_dir):
+    if not bundle_file.exists():
+        raise FileNotFoundError(f"Bundle file missing: {bundle_file}")
+
+    with open(bundle_file, "rb") as f:
+        bundle: ModelBundle = pickle.load(f)
+
+    print(f"✓ Loaded model from: {model_path}")
+
+    return bundle
+
+# List Models
+def list_available_models(model_dir: Path | str = DEFAULT_MODEL_DIR) -> List[str]:
+
+    model_dir = Path(model_dir)
+
+    if not model_dir.exists():
         return []
-    
+
     models = []
-    for item in os.listdir(model_dir):
-        item_path = os.path.join(model_dir, item)
-        if os.path.isdir(item_path):
-            # Check if it contains a model file
-            if os.path.exists(os.path.join(item_path, "trained_model.pkl")):
-                models.append(item)
-    
+
+    for item in model_dir.iterdir():
+        if item.is_dir() and (item / BUNDLE_FILENAME).exists():
+            models.append(item.name)
+
     return sorted(models)
 
+# Metadata Inspection
+def get_model_info(model_name: str, model_dir: Path | str = DEFAULT_MODEL_DIR) -> Dict[str, Any]:
 
-def get_model_info(
-    model_name: str,
-    model_dir: str = "models/saved_models"
-) -> Dict:
-    """
-    Get metadata for a model without loading the full model.
-    
-    Useful for quickly checking model properties.
-    
-    Args:
-        model_name: Name of the model
-        model_dir: Directory containing models
-        
-    Returns:
-        Dictionary of model metadata
-        
-    Example:
-        >>> info = get_model_info("production_v1")
-        >>> print(f"Accuracy: {info['results']['accuracy']}")
-    """
-    metadata_file = os.path.join(model_dir, model_name, "metadata.json")
-    
-    if not os.path.exists(metadata_file):
+    model_dir = Path(model_dir)
+    metadata_file = model_dir / model_name / METADATA_FILENAME
+
+    if not metadata_file.exists():
         return {}
-    
-    with open(metadata_file, 'r') as f:
+
+    with open(metadata_file, "r") as f:
         return json.load(f)
 
+# Model Comparison
+def compare_models(model_names: List[str], model_dir: Path | str = DEFAULT_MODEL_DIR) -> None:
 
-def compare_models(
-    model_names: list,
-    model_dir: str = "models/saved_models"
-) -> None:
-    """
-    Compare multiple saved models.
-    
-    Args:
-        model_names: List of model names to compare
-        model_dir: Directory containing models
-        
-    Example:
-        >>> compare_models(['model_v1', 'model_v2', 'model_v3'])
-    """
-    print(f"\n{'='*80}")
+    print("\n" + "=" * 80)
     print("MODEL COMPARISON")
-    print(f"{'='*80}\n")
-    
-    print(f"{'Model Name':<20} {'Type':<15} {'Accuracy':<10} {'F1 Score':<10} {'Created'}")
+    print("=" * 80)
+
+    header = f"{'Model':<25} {'Type':<15} {'Accuracy':<10} {'Created'}"
+    print(header)
     print("-" * 80)
-    
+
     for name in model_names:
+
         info = get_model_info(name, model_dir)
+
         if not info:
-            print(f"{name:<20} {'Not found':>45}")
+            print(f"{name:<25} NOT FOUND")
             continue
-        
-        model_type = info.get('model_type', 'Unknown')[:14]
-        accuracy = info.get('results', {}).get('accuracy', 0)
-        f1 = info.get('results', {}).get('f1_macro', 0)
-        created = info.get('timestamp', 'Unknown')[:10]
-        
-        print(f"{name:<20} {model_type:<15} {accuracy:<10.2%} {f1:<10.4f} {created}")
 
+        model_type = info.get("model_type", "Unknown")
+        acc = info.get("results", {}).get("test_accuracy", 0)
+        created = info.get("timestamp", "Unknown")[:10]
 
-def generate_model_readme(metadata: Dict, results: Optional[Dict] = None) -> str:
-    """
-    Generate a README file for the model.
-    
-    Args:
-        metadata: Model metadata dictionary
-        results: Evaluation results dictionary
-        
-    Returns:
-        README content as string
-    """
-    readme = f"""# Model: {metadata.get('model_name', 'Unknown')}
+        print(f"{name:<25} {model_type:<15} {float(acc):<10.2%} {created}")
 
-## Model Information
+# Convenience Loader for Realtime
+def load_for_inference(model_name: str | Path, model_dir: Path | str = DEFAULT_MODEL_DIR):
 
-- **Created**: {metadata.get('timestamp', 'Unknown')}
-- **Model Type**: {metadata.get('model_type', 'Unknown')}
-- **Scaler Type**: {metadata.get('scaler_type', 'Unknown')}
-- **Number of Features**: {metadata.get('n_features', 'Unknown')}
-- **Number of Classes**: {metadata.get('n_classes', 'Unknown')}
+    bundle = load_model_bundle(model_name, model_dir)
 
-## Classes
+    return bundle.pipeline, bundle
 
-"""
-    
-    # Add class information
-    class_names = metadata.get('class_names', {})
-    for class_id, class_name in class_names.items():
-        readme += f"- **{class_id}**: {class_name}\n"
-    
-    # Add performance metrics
-    if results or 'results' in metadata:
-        results = results or metadata.get('results', {})
-        readme += f"""
-## Performance
-
-- **Test Accuracy**: {results.get('accuracy', 0):.2%}
-- **Macro F1 Score**: {results.get('f1_macro', 0):.4f}
-- **Weighted F1 Score**: {results.get('f1_weighted', 0):.4f}
-"""
-        
-        if 'train_accuracy' in results:
-            train_acc = results['train_accuracy']
-            test_acc = results['accuracy']
-            overfitting = train_acc - test_acc
-            readme += f"- **Training Accuracy**: {train_acc:.2%}\n"
-            if overfitting > 0.10:
-                readme += f"- ⚠️ **Warning**: Possible overfitting (gap: {overfitting:.2%})\n"
-    
-    # Add configuration
-    if 'config' in metadata:
-        config = metadata['config']
-        readme += f"""
-## Training Configuration
-
-"""
-        for key, value in config.items():
-            readme += f"- **{key}**: {value}\n"
-    
-    # Add usage instructions
-    readme += f"""
-## Files in This Package
-
-- `trained_model.pkl`: Trained classifier object
-- `scaler.pkl`: Fitted feature scaler
-- `metadata.json`: Model metadata in JSON format
-- `README.md`: This file
-- `confusion_matrix.txt`: Confusion matrix (if available)
-
-## Usage
-
-### In Python Scripts
-
-```python
-from src.models.model_utils import load_model_package
-
-# Load the model
-package = load_model_package('{metadata.get('model_name', 'model_name')}')
-clf = package['model']
-scaler = package['scaler']
-
-# Make predictions
-X_scaled = scaler.transform(X_new)
-predictions = clf.predict(X_scaled)
-```
-
-### For Real-Time Classification
-
-```bash
-python scripts/realtime_classify.py --model-name {metadata.get('model_name', 'model_name')}
-```
-
-## Notes
-
-This model was trained as part of the EMG+IMU prosthetic hand control project.
-For questions or issues, contact the development team.
-"""
-    
-    return readme
-
-
+# CLI Test
 if __name__ == "__main__":
-    # Example usage / testing
-    print("Testing model_utils module...")
-    
-    # Check if any models exist
+
+    print("Available models:")
     models = list_available_models()
-    
+
     if models:
-        print(f"\nFound {len(models)} saved model(s):")
-        for model in models:
-            print(f"  - {model}")
-        
-        # Show comparison
-        if len(models) > 1:
-            compare_models(models[:3])  # Compare first 3
+        for m in models:
+            print(f"  - {m}")
     else:
-        print("\nNo saved models found.")
-        print("Train a model first using: python scripts/train_model.py")
-    
-    print("\n✓ model_utils module working correctly!")
+        print("None found")
+
+    print("\n✓ model_utils ready")

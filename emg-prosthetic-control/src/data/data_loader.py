@@ -1,14 +1,36 @@
 import pandas as pd
 import numpy as np
 
-def load_emg_imu(csv_path, fs_emg=962.963, fs_imu=148.1481, galileo_only=False):
+from .filtering import preprocess_emg
+from .filtering import preprocess_imu
+
+def load_emg_imu(csv_path, fs_emg=962.963, fs_imu=148.1481, galileo_only=False, apply_filtering=True):
     """
     Load EMG + IMU data from Delsys Trigno CSV with proper sensor identification.
-
-    Returns:
-        emg_data: dict {sensor_name: (n_samples_emg, n_emg_channels)}
-        imu_data: dict {sensor_name: (n_samples_imu, 6)}
-        time_data: dict {sensor_name: time_emg, sensor_name_imu: time_imu}
+    
+    Parameters
+    ----------
+    csv_path : str
+        Path to CSV export from Trigno.
+    fs_emg : float
+        EMG sampling frequency (Hz).
+    fs_imu : float
+        IMU sampling frequency (Hz).
+    galileo_only : bool
+        Keep only sensors with 'Galileo' in name.
+    apply_filtering : bool
+        Apply EMG and IMU preprocessing filters.
+    
+    Returns
+    -------
+    emg_data : dict
+        {sensor_name: (n_samples_emg, n_emg_channels)}
+    imu_data : dict
+        {sensor_name: (n_samples_imu, 6)}
+    time_data : dict
+        {sensor_name: time_emg, sensor_name_imu: time_imu}
+    fs_emg, fs_imu : float
+        Sampling rates
     """
     # --- STEP 1: Read sensor + measurement rows ---
     sensor_row = pd.read_csv(csv_path, header=None, skiprows=3, nrows=1).iloc[0].tolist()
@@ -96,31 +118,35 @@ def load_emg_imu(csv_path, fs_emg=962.963, fs_imu=148.1481, galileo_only=False):
         if data['emg']:
             min_len_emg = min(len(ch) for ch in data['emg'])
             emg_stack = np.column_stack([ch[:min_len_emg] for ch in data['emg']])
-            # Remove any rows containing NaN
             emg_stack = emg_stack[~np.isnan(emg_stack).any(axis=1)]
+
+            # --- Apply preprocessing ---
+            if apply_filtering:
+                # Remove DC offset
+                emg_stack = emg_stack - np.mean(emg_stack, axis=0)
+                # Notch + Bandpass
+                emg_stack = preprocess_emg(emg_stack, fs=fs_emg)
+
             emg_data[sensor] = emg_stack
+
             if data['time_emg'] is not None:
-                # Trim time array to match EMG rows after NaN removal
                 time_emg_trimmed = data['time_emg'][:min_len_emg]
                 time_data[sensor] = time_emg_trimmed[:emg_stack.shape[0]].reshape(-1,1)
 
-        # --- IMU: stack channels, trim to min length of available channels, remove rows with NaN ---
+        # --- IMU: stack channels, trim to min length, remove NaN ---
         imu_channels = [data[k] for k in ['acc_x','acc_y','acc_z','gyro_x','gyro_y','gyro_z'] if data[k] is not None]
-        # Skip empty IMU columns entirely
         imu_channels = [ch for ch in imu_channels if not np.all(np.isnan(ch))]
         if imu_channels:
             min_len_imu = min(len(ch) for ch in imu_channels)
             imu_stack = np.column_stack([ch[:min_len_imu] for ch in imu_channels])
-            # Remove rows containing NaN
             imu_stack = imu_stack[~np.isnan(imu_stack).any(axis=1)]
+
+            if apply_filtering:
+                imu_stack = preprocess_imu(imu_stack, fs=fs_imu)
+
             imu_data[sensor] = imu_stack
             if data['time_imu'] is not None:
                 time_imu_trimmed = data['time_imu'][:min_len_imu]
                 time_data[f"{sensor}_imu"] = time_imu_trimmed[:imu_stack.shape[0]].reshape(-1,1)
 
-    # # --- STEP 5: Debug prints ---
-    # print("Loaded EMG sensors:", list(emg_data.keys()))
-    # print("Loaded IMU sensors:", list(imu_data.keys()))
-    # for sensor in emg_data.keys():
-    #     print(f"{sensor}: EMG {emg_data[sensor].shape}, IMU {imu_data.get(sensor,'NA') if sensor in imu_data else 'NA'}")
     return emg_data, imu_data, time_data, fs_emg, fs_imu
