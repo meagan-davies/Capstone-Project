@@ -1,0 +1,35 @@
+# Data paths
+data:
+  dir: "data"
+  
+# Model paths
+models:
+  save_dir: "models/saved_models"
+  default_name: "model_latest"
+# TODO: Add an available models section to implement multiple models
+
+# Feature extraction parameters
+features:
+  window_sec: 0.20
+  overlap_sec: 0.10
+  fs_emg: 963
+  fs_imu: 148.148
+
+# Training parameters
+training:
+  test_size: 0.3
+  random_state: 42
+  cv_folds: 5
+  scaler_type: "standard"  # standard, robust, or minmax
+
+# Class definitions
+classes:
+  0: "Neutral"
+  1: "Pinching"
+  2: "Grasping"
+  3: "Zipping"
+
+# Real-time parameters
+realtime:
+  prediction_smoothing: 5  # Number of predictions to smooth over
+  update_rate_hz: 10

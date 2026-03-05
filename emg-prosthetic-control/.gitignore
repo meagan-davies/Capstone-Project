@@ -26,9 +26,6 @@ resources/DelsysAPI
 resources/delsys_key.txt
 resources/delsys_license.lic
 
-#LeapMotion
-/leapmotion/*
-
 # IDE
 .vscode/
 .idea/

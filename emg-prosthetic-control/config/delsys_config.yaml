@@ -1,0 +1,18 @@
+# Delsys API configuration
+delsys:
+  # Connection settings
+  host: "localhost"
+  
+  # API files location
+  api_path: "../resources/DelsysAPI"
+  
+  # Credentials (paths to files)
+  key_file: "../resources/delsys_key.txt"
+  license_file: "../resources/delsys_license.lic"
+  
+  # Hardware configuration
+  expected_emg_channels: 4
+  expected_imu_channels: 6  # 3 acc + 3 gyro per sensor
+  
+  # Connection type
+  connection_type: "RF"  # RF or USB
