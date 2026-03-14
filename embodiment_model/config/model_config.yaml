@@ -1,0 +1,125 @@
+# Embodiment Model Configuration
+
+# Sensor Configuration
+sensors:
+  leap_motion:
+    sampling_rate: 115
+    tracking_mode: desktop
+  
+  bioradio:
+    sampling_rate: 1000
+    channels:
+      emg: [0, 1, 2, 3]
+      ecg: 4
+      eda: 5
+  
+  apple_watch:
+    sampling_rate: 50
+    metrics:
+      - heart_rate
+      - hrv
+      - accelerometer
+
+# Data Processing
+processing:
+  synchronization:
+    target_sampling_rate: 100  # Hz
+    method: linear_interpolation
+  
+  windowing:
+    window_size: 5.0  # seconds
+    overlap: 0.0  # no overlap for embodiment
+
+# Feature Engineering
+features:
+  control_accuracy:
+    - tracking_error
+    - movement_smoothness
+    - path_efficiency
+    - response_latency
+  
+  physiological:
+    cardiac:
+      - hr_mean
+      - hr_std
+      - hrv_rmssd
+      - hrv_sdnn
+      - lf_hf_ratio
+    
+    muscle:
+      - emg_rms
+      - emg_mean_frequency
+      - emg_activation_rate
+    
+    arousal:
+      - eda_mean
+      - eda_tonic
+      - eda_phasic_peaks
+  
+  synchrony:
+    - emg_movement_correlation
+    - watch_leap_correlation
+    - hr_movement_correlation
+    - emg_movement_lag
+
+# Model Configuration
+model:
+  type: ridge  # ridge, lasso, random_forest, xgboost
+  
+  feature_selection:
+    enabled: true
+    method: lasso  # lasso, rfe, random_forest
+    n_features: 30
+    variance_threshold: 0.01
+  
+  hyperparameters:
+    ridge:
+      alpha: 1.0
+    
+    lasso:
+      alpha: 0.1
+      max_iter: 10000
+    
+    random_forest:
+      n_estimators: 100
+      max_depth: 5
+      min_samples_split: 10
+    
+    xgboost:
+      n_estimators: 100
+      max_depth: 3
+      learning_rate: 0.05
+      subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 0.1
+      reg_lambda: 1.0
+
+# Validation
+validation:
+  method: leave_one_subject_out
+  metrics:
+    - r2
+    - mae
+    - rmse
+    - correlation
+  
+  target_performance:
+    r2_min: 0.50
+    mae_max: 12.0
+
+# Real-time Monitoring
+realtime:
+  enabled: false
+  window_size: 5.0  # seconds
+  update_rate: 10.0  # Hz
+  smoothing:
+    enabled: true
+    method: moving_average
+    window: 5  # samples
+
+# Output
+output:
+  save_predictions: true
+  save_feature_importance: true
+  save_formula: true
+  plot_results: true
