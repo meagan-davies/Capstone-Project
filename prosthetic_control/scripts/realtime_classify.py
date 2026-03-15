@@ -84,7 +84,7 @@ def main():
 
     # Step 5: Initialize processor
     print("\nStep 5: Setting up data processor...")
-    model_path = Path("models") / args.model_name
+    model_path = Path("prosthetic_control/models") / args.model_name
     try:
         processor = RealtimeProcessor(
             delsys_client=client,
