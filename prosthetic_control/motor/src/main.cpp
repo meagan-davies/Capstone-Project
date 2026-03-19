@@ -14,8 +14,8 @@ int thumbPos = 0;
 int servo2Pos = 0;
 int servo3Pos = 0;
 
-// 0 = neutral, 1 = pinch, 2 = grasp, 3 = clench unclench, 4 = test thumb
-int gesture = 3;
+// 0 = neutral, 1 = pinch, 2 = grasp, 3 = zipping (from Python)
+int gesture = 0;
 
 int last_gesture = -1;
 
@@ -53,24 +53,24 @@ void grasp() {
 }
 
 void move_thumb() {
-    for (pos = mindeg; pos <= maxdeg; pos += 1) { // goes from 0 degrees to 180 degrees in steps of 1 degree
+    for (pos = mindeg; pos <= maxdeg; pos += 1) {
     thumb.write(pos);
-    delay(15);                          // wait 15 ms for servo to reach position
+    delay(15);
   }
-  for (pos = maxdeg; pos >= mindeg; pos -= 1) { // goes from 180 degrees to 0 degrees
+  for (pos = maxdeg; pos >= mindeg; pos -= 1) {
     thumb.write(pos);
     delay(15);
   }
 }
 
 void clench_unclench() {
-  for (pos = mindeg; pos <= maxdeg; pos += 1) { // goes from 0 degrees to 180 degrees in steps of 1 degree
+  for (pos = mindeg; pos <= maxdeg; pos += 1) {
     thumb.write(pos);
     servo2.write(pos);
     servo3.write(pos);
-    delay(15);                          // wait 15 ms for servo to reach position
+    delay(15);
   }
-  for (pos = maxdeg; pos >= mindeg; pos -= 1) { // goes from 180 degrees to 0 degrees
+  for (pos = maxdeg; pos >= mindeg; pos -= 1) {
     thumb.write(pos);
     servo2.write(pos);
     servo3.write(pos);
@@ -91,17 +91,24 @@ void setup() {
   thumbPos = mindeg;
   servo2Pos = mindeg;
   servo3Pos = mindeg;
+  
+  // Signal ready to Python
+  Serial.println("Arduino Ready");
 }
 
 void loop() {
 
-  // Read incoming data
+  // Read incoming data from Python (single byte)
   if (Serial.available() > 0) {
-    int incoming = Serial.parseInt();
-
-    // Debounce / filter
-    if (incoming != gesture) {
+    int incoming = Serial.read();  // Changed from parseInt() to read()
+    
+    // Validate command (0-3 from Python)
+    if (incoming >= 0 && incoming <= 3) {
       gesture = incoming;
+      
+      // Echo for debugging
+      Serial.print("Received: ");
+      Serial.println(gesture);
     }
   }
 
@@ -113,8 +120,7 @@ void loop() {
     if (gesture == 0) neutral();
     else if (gesture == 1) pinch();
     else if (gesture == 2) grasp();
-    else if (gesture == 3) clench_unclench();
-    else if (gesture == 4) move_thumb();
+    else if (gesture == 3) clench_unclench();  // Using for "Zipping" gesture
 
     last_gesture = gesture;
   }
