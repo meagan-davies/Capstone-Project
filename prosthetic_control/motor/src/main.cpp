@@ -79,19 +79,32 @@ void clench_unclench() {
 }
 
 void setup() {
+  Serial.begin(9600);
+  
   thumb.attach(8);
   servo2.attach(10);
   servo3.attach(12);
 
-  moveSmooth(mindeg, mindeg, mindeg, 20);
+  moveSmooth(mindeg, mindeg, mindeg, 20); // move to neutral upon startup
 
-  // Sync software with reality
+  // sync position with neutral
   thumbPos = mindeg;
   servo2Pos = mindeg;
   servo3Pos = mindeg;
 }
 
 void loop() {
+
+  // Read incoming data
+  if (Serial.available() > 0) {
+    int incoming = Serial.parseInt();
+
+    // Debounce / filter
+    if (incoming != gesture) {
+      gesture = incoming;
+    }
+  }
+
   if (gesture != last_gesture) {
 
     moveSmooth(mindeg, mindeg, mindeg, 10);
