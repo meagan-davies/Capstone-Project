@@ -1,44 +1,57 @@
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.pyd
 *.so
-.Python
+
+# Virtual environments
 venv/
-env/
-ENV/
+.env/
+.envrc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (important)
+data/raw/
+data/processed/
+artifacts/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Delsys SDK (if licensed)
+prosthetic_control/resources/DelsysAPI/
+
+# Keys and licenses
+*.lic
+*key.txt
+
+### Prosthetic Control Files
 
 # Jupyter
 .ipynb_checkpoints
 *.ipynb_checkpoints
 
 # Data
-data/*
-!data/.gitkeep
-logs/*
+prosthetic_control/data/*
+prosthetic_control/!data/.gitkeep
+prosthetic_control/logs/*
 
 # Models
-models/saved_models/*
-!models/saved_models/.gitkeep
+# prosthetic_control/models/*
+# prosthetic_control/!models/.gitkeep
 
 # Delsys API + credentials
-resources/DelsysAPI
-resources/delsys_key.txt
-resources/delsys_license.lic
-
-#LeapMotion
-/leapmotion/*
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
+prosthetic_control/resources/DelsysAPI
+prosthetic_control/resources/delsys_key.txt
+prosthetic_control/resources/delsys_license.lic

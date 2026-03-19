@@ -610,8 +610,8 @@ class DelsysClient:
             )
 
 def load_credentials(
-        key_file: str = "resources/delsys_key.txt",
-        license_file: str = "resources/delsys_license.lic"
+        key_file: str = "prosthetic_control/resources/delsys_key.txt",
+        license_file: str = "prosthetic_control/resources/delsys_license.lic"
     ) -> tuple:
         """
         Load Delsys credentials from files.
