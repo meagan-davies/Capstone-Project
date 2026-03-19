@@ -71,8 +71,7 @@ def extract_emg_features(emg_signal, fs=1000):
     
     return features
 
-# TODO: confirm frequency rate in data and/or datasheet
-def extract_eda_features(eda_signal, fs=1000):
+def extract_eda_features(eda_signal, fs=500):
     """
     Extract electrodermal activity features
     

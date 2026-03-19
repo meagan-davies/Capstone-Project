@@ -10,7 +10,7 @@ import pickle
 
 # Add shared to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "shared"))
-from ml_utils import leave_one_subject_out_cv, scale_features
+from ml_utils import leave_one_subject_out_cv
 
 from .regressor import EmbodimentRegressor, select_features_lasso
 

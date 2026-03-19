@@ -51,6 +51,29 @@ except ImportError:
     from data.data_loader import EmbodimentSession   # fallback for direct script runs
     from data.parsers import leapmotion_parser
 
+# Locate shared/ by walking up from this file until we find it
+def _find_shared() -> "Optional[str]":
+    import pathlib, sys as _s
+    p = pathlib.Path(__file__).resolve()
+    for _ in range(6):          # max 6 levels up
+        candidate = p / "shared"
+        if candidate.is_dir():
+            return str(candidate)
+        p = p.parent
+    return None
+
+_shared_path = _find_shared()
+if _shared_path:
+    import sys as _sys
+    if _shared_path not in _sys.path:
+        _sys.path.insert(0, _shared_path)
+
+try:
+    from control_metrics import calculate_movement_smoothness, calculate_path_efficiency
+    _CONTROL_METRICS_AVAILABLE = True
+except ImportError:
+    _CONTROL_METRICS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -172,6 +195,23 @@ def _leap_to_grid(
         "palm_speed_mean":  rs["palm_speed"].mean(),
         "palm_speed_max":   rs["palm_speed"].max(),
     })
+
+    # Movement smoothness + path length from shared/control_metrics.py
+    if _CONTROL_METRICS_AVAILABLE:
+        def _smoothness_in_window(group):
+            pos = group[["palm_tx", "palm_ty", "palm_tz"]].values
+            if len(pos) < 4:            # need ≥ 4 pts for 3 derivatives
+                return np.nan
+            return calculate_movement_smoothness(pos)
+
+        def _path_length_in_window(group):
+            pos = group[["palm_tx", "palm_ty", "palm_tz"]].values
+            if len(pos) < 2:
+                return 0.0
+            return float(np.sum(np.linalg.norm(np.diff(pos, axis=0), axis=1)))
+
+        leap_grid["movement_smoothness"] = rs.apply(_smoothness_in_window)
+        leap_grid["path_length_mm"]      = rs.apply(_path_length_in_window)
 
     # Pinch event count per second
     events = leapmotion_parser.detect_pinch_events(
