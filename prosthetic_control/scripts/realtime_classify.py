@@ -186,7 +186,7 @@ def main():
                 if motor:
                     # Send to motor
                     if motor.send_gesture(class_name):
-                        motor_status = " → 🤖 Motor"
+                        motor_status = " "
                     else:
                         motor_status = " → ⚠️ Motor error"
                 
@@ -197,7 +197,7 @@ def main():
                     print(f"         Buffer: EMG={buf_status['emg_sample_count']}, "
                           f"IMU={buf_status['imu_sample_count']}")
             
-            time.sleep(0.05)
+            time.sleep(1)
 
     except KeyboardInterrupt:
         print("\n\nStopping real-time classification...")

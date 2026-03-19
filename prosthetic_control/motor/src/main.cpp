@@ -45,7 +45,12 @@ void neutral() {
 }
 
 void pinch() {
-  moveSmooth(maxdeg, maxdeg, 90, 10);
+  moveSmooth(maxdeg, servo2Pos, servo3Pos, 15); // move thumb first
+  delay(100);
+
+  moveSmooth(maxdeg, maxdeg, servo3Pos, 15); 
+
+  moveSmooth(maxdeg, maxdeg, 30, 15); // keep ring/pinky semi-open
 }
 
 void grasp() {
