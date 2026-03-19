@@ -1,0 +1,132 @@
+#include <Arduino.h>
+#include <Servo.h>
+
+Servo thumb;
+Servo servo2;
+Servo servo3;
+
+int pos;
+
+int mindeg = 0;
+int maxdeg = 180;
+
+int thumbPos = 0;
+int servo2Pos = 0;
+int servo3Pos = 0;
+
+// 0 = neutral, 1 = pinch, 2 = grasp, 3 = zipping (from Python)
+int gesture = 0;
+
+int last_gesture = -1;
+
+void moveSmooth(int targetThumb, int targetS2, int targetS3, int stepDelay) {
+
+  while (thumbPos != targetThumb || servo2Pos != targetS2 || servo3Pos != targetS3) {
+
+    if (thumbPos < targetThumb) thumbPos++;
+    else if (thumbPos > targetThumb) thumbPos--;
+
+    if (servo2Pos < targetS2) servo2Pos++;
+    else if (servo2Pos > targetS2) servo2Pos--;
+
+    if (servo3Pos < targetS3) servo3Pos++;
+    else if (servo3Pos > targetS3) servo3Pos--;
+
+    thumb.write(thumbPos);
+    servo2.write(servo2Pos);
+    servo3.write(servo3Pos);
+
+    delay(stepDelay);
+  }
+}
+
+void neutral() {
+  moveSmooth(mindeg, mindeg, mindeg, 10);
+}
+
+void pinch() {
+  moveSmooth(maxdeg, servo2Pos, servo3Pos, 15); // move thumb first
+  delay(100);
+
+  moveSmooth(maxdeg, maxdeg, servo3Pos, 15); 
+
+  moveSmooth(maxdeg, maxdeg, 30, 15); // keep ring/pinky semi-open
+}
+
+void grasp() {
+  moveSmooth(maxdeg, maxdeg, maxdeg, 10);
+}
+
+void move_thumb() {
+    for (pos = mindeg; pos <= maxdeg; pos += 1) {
+    thumb.write(pos);
+    delay(15);
+  }
+  for (pos = maxdeg; pos >= mindeg; pos -= 1) {
+    thumb.write(pos);
+    delay(15);
+  }
+}
+
+void clench_unclench() {
+  for (pos = mindeg; pos <= maxdeg; pos += 1) {
+    thumb.write(pos);
+    servo2.write(pos);
+    servo3.write(pos);
+    delay(15);
+  }
+  for (pos = maxdeg; pos >= mindeg; pos -= 1) {
+    thumb.write(pos);
+    servo2.write(pos);
+    servo3.write(pos);
+    delay(15);
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  
+  thumb.attach(8);
+  servo2.attach(10);
+  servo3.attach(12);
+
+  moveSmooth(mindeg, mindeg, mindeg, 20); // move to neutral upon startup
+
+  // sync position with neutral
+  thumbPos = mindeg;
+  servo2Pos = mindeg;
+  servo3Pos = mindeg;
+  
+  // Signal ready to Python
+  Serial.println("Arduino Ready");
+}
+
+void loop() {
+
+  // Read incoming data from Python (single byte)
+  if (Serial.available() > 0) {
+    int incoming = Serial.read();  // Changed from parseInt() to read()
+    
+    // Validate command (0-3 from Python)
+    if (incoming >= 0 && incoming <= 3) {
+      gesture = incoming;
+      
+      // Echo for debugging
+      Serial.print("Received: ");
+      Serial.println(gesture);
+    }
+  }
+
+  if (gesture != last_gesture) {
+
+    moveSmooth(mindeg, mindeg, mindeg, 10);
+    delay(150);
+
+    if (gesture == 0) neutral();
+    else if (gesture == 1) pinch();
+    else if (gesture == 2) grasp();
+    else if (gesture == 3) clench_unclench();  // Using for "Zipping" gesture
+
+    last_gesture = gesture;
+  }
+}

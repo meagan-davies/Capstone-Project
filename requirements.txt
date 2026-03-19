@@ -21,3 +21,6 @@ pythonnet==3.0.5
 # Dev + notebooks
 pytest>=7.2,<9.0
 jupyter>=1.0,<2.0
+
+# Motor
+pyserial==3.5
