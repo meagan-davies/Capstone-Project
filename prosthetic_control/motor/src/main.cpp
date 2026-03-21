@@ -14,7 +14,7 @@ int thumbPos = 0;
 int servo2Pos = 0;
 int servo3Pos = 0;
 
-// 0 = neutral, 1 = pinch, 2 = grasp, 3 = zipping (from Python)
+// 0 = neutral, 1, 3 = pinch and zip, 2 = grasp, 4 = clench unclench, 5 = move thumb
 int gesture = 0;
 
 int last_gesture = -1;
@@ -50,7 +50,7 @@ void pinch() {
 
   moveSmooth(maxdeg, maxdeg, servo3Pos, 15); 
 
-  moveSmooth(maxdeg, maxdeg, 30, 15); // keep ring/pinky semi-open
+  moveSmooth(maxdeg, maxdeg, 20, 15); // keep ring/pinky semi-open
 }
 
 void grasp() {
@@ -90,7 +90,9 @@ void setup() {
   servo2.attach(10);
   servo3.attach(12);
 
-  moveSmooth(mindeg, mindeg, mindeg, 20); // move to neutral upon startup
+  thumb.write(mindeg);
+  servo2.write(mindeg);
+  servo3.write(mindeg);
 
   // sync position with neutral
   thumbPos = mindeg;
@@ -125,7 +127,9 @@ void loop() {
     if (gesture == 0) neutral();
     else if (gesture == 1) pinch();
     else if (gesture == 2) grasp();
-    else if (gesture == 3) clench_unclench();  // Using for "Zipping" gesture
+    else if (gesture == 3) pinch();  // Using for "Zipping" gesture
+    else if (gesture == 4) clench_unclench(); // for testing
+    else if (gesture == 5) move_thumb();      // for testing
 
     last_gesture = gesture;
   }
