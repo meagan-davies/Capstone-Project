@@ -2,7 +2,7 @@
 Model Training
 
 Provides:
-- Training pipeline
+- Training pipeline with LDA or SVM
 - Cross-validation
 - Evaluation metrics
 - Model bundle container
@@ -18,6 +18,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.svm import SVC
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -38,6 +39,7 @@ class ModelBundle:
     class_names: Optional[List[str]]
     cv_scores: Optional[np.ndarray]
     scaler_type: str
+    classifier_type: str  # Added to track which classifier was used
     n_classes: int
 
     def predict(self, X: np.ndarray):
@@ -47,9 +49,13 @@ class ModelBundle:
         return self.pipeline.predict_proba(X)
 
 # Pipeline Builder
-def build_pipeline(scaler_type: str = "robust") -> Pipeline:
+def build_pipeline(scaler_type: str = "robust", classifier_type: str = "lda") -> Pipeline:
     """
-    Create sklearn pipeline with scaler + LDA classifier.
+    Create sklearn pipeline with scaler + classifier.
+    
+    Args:
+        scaler_type: "standard", "robust", or "minmax"
+        classifier_type: "lda" or "svm"
     """
 
     scaler_map = {
@@ -61,21 +67,48 @@ def build_pipeline(scaler_type: str = "robust") -> Pipeline:
     if scaler_type not in scaler_map:
         raise ValueError(f"Unknown scaler_type: {scaler_type}")
 
-    pipeline = Pipeline([
-        ("scaler", scaler_map[scaler_type]),
-        ("clf", LinearDiscriminantAnalysis(
+    # Choose classifier
+    if classifier_type == "lda":
+        classifier = LinearDiscriminantAnalysis(
             solver="lsqr",
             shrinkage="auto",
-        )),
+        )
+    elif classifier_type == "svm":
+        classifier = SVC(
+            kernel='rbf',
+            C=10,
+            gamma=0.01,
+            probability=True,
+            class_weight='balanced',
+            random_state=42,
+        )
+    else:
+        raise ValueError(f"Unknown classifier_type: {classifier_type}. Choose 'lda' or 'svm'")
+
+    pipeline = Pipeline([
+        ("scaler", scaler_map[scaler_type]),
+        ("clf", classifier),
     ])
 
     return pipeline
 
 # Training Function
-def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_size: float = 0.3, random_state: int = 42,
-    cv_folds: int = 5, class_names: Optional[List[str]] = None, verbose: bool = True,) -> Tuple[ModelBundle, Dict, Dict]:
+def train_model(
+    X: np.ndarray, 
+    y: np.ndarray, 
+    scaler_type: str = "robust",
+    classifier_type: str = "lda",  # Added parameter
+    test_size: float = 0.3, 
+    random_state: int = 42,
+    cv_folds: int = 5, 
+    class_names: Optional[List[str]] = None, 
+    verbose: bool = True,
+) -> Tuple[ModelBundle, Dict, Dict]:
     """
     Train model with cross-validation and evaluation.
+    
+    Args:
+        classifier_type: "lda" (default) or "svm"
 
     Returns:
         bundle: ModelBundle
@@ -85,6 +118,8 @@ def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_
 
     if verbose:
         print("\n===== Training Model =====")
+        print(f"Classifier: {classifier_type.upper()}")
+        print(f"Scaler: {scaler_type}")
 
     # Train / Test Split
     X_train, X_test, y_train, y_test = train_test_split(
@@ -96,7 +131,7 @@ def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_
     )
 
     # Pipeline
-    pipeline = build_pipeline(scaler_type=scaler_type)
+    pipeline = build_pipeline(scaler_type=scaler_type, classifier_type=classifier_type)
 
     # Cross-validation
     cv_scores = None
@@ -121,10 +156,13 @@ def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_
             print(f"Mean CV F1: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
 
     # Fit Final Model
+    if verbose:
+        print(f"\nTraining on {len(X_train)} samples...")
+    
     pipeline.fit(X_train, y_train)
 
     if verbose:
-        print(f"✓ Model trained on {len(X_train)} samples")
+        print(f"✓ Model trained")
 
     # Evaluation
     y_train_pred = pipeline.predict(X_train)
@@ -186,6 +224,7 @@ def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_
     # Training Config
     config = {
         "scaler_type": scaler_type,
+        "classifier_type": classifier_type,  # Added to config
         "test_size": test_size,
         "random_state": random_state,
         "cv_folds": cv_folds,
@@ -200,6 +239,7 @@ def train_model(X: np.ndarray, y: np.ndarray, scaler_type: str = "robust", test_
         class_names=class_names,
         cv_scores=cv_scores,
         scaler_type=scaler_type,
+        classifier_type=classifier_type,  # Added to bundle
         n_classes=len(np.unique(y)),
     )
 
@@ -222,7 +262,7 @@ def validate_feature_shape(bundle: ModelBundle, X: np.ndarray):
 # Development Test
 if __name__ == "__main__":
 
-    print("Testing training module...")
+    print("Testing training module with both classifiers...")
 
     from sklearn.datasets import make_classification
 
@@ -234,11 +274,37 @@ if __name__ == "__main__":
         random_state=42,
     )
 
-    bundle, metrics, config = train_model(
-        X,
-        y,
-        class_names=["Neutral", "Pinch", "Grasp", "Zip"],
+    class_names = ["Neutral", "Pinch", "Grasp", "Zip"]
+
+    # Test LDA
+    print("\n" + "="*70)
+    print("TESTING LDA")
+    print("="*70)
+    bundle_lda, metrics_lda, config_lda = train_model(
+        X, y,
+        classifier_type="lda",
+        class_names=class_names,
         verbose=True,
     )
 
-    print("\n✓ Training module working")
+    # Test SVM
+    print("\n" + "="*70)
+    print("TESTING SVM")
+    print("="*70)
+    bundle_svm, metrics_svm, config_svm = train_model(
+        X, y,
+        classifier_type="svm",
+        class_names=class_names,
+        verbose=True,
+    )
+
+    # Compare
+    print("\n" + "="*70)
+    print("COMPARISON")
+    print("="*70)
+    print(f"LDA Test Accuracy: {metrics_lda['test_accuracy']:.4f}")
+    print(f"SVM Test Accuracy: {metrics_svm['test_accuracy']:.4f}")
+    print(f"LDA F1 Macro:      {metrics_lda['f1_macro']:.4f}")
+    print(f"SVM F1 Macro:      {metrics_svm['f1_macro']:.4f}")
+
+    print("\n✓ Training module working with both classifiers")

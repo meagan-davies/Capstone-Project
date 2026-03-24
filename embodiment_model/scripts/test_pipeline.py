@@ -7,20 +7,20 @@ real session files, and optionally write processed outputs to disk.
 Usage (from repo root)
 -----------------------
   # Test a single session
-  python embodiment-model/scripts/test_pipeline.py \
+  python embodiment_model/scripts/test_pipeline.py \
       --session-dir data/raw/embodiment/P01_control_trial001
 
   # Test every session in the folder
-  python embodiment-model/scripts/test_pipeline.py \
+  python embodiment_model/scripts/test_pipeline.py \
       --data-dir data/raw/embodiment/
 
   # Test + write feature_matrix.csv and session_report.json
-  python embodiment-model/scripts/test_pipeline.py \
+  python embodiment_model/scripts/test_pipeline.py \
       --data-dir data/raw/embodiment/ \
       --save-processed data/processed/
 
   # Verbose: also prints the feature matrix row-by-row
-  python embodiment-model/scripts/test_pipeline.py \
+  python embodiment_model/scripts/test_pipeline.py \
       --session-dir data/raw/embodiment/P01_control_trial001 --verbose
 
 What it checks

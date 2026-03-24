@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument('--test-size',  type=float, default=0.2)
     parser.add_argument('--cv-folds',   type=int,   default=5)
     parser.add_argument('--no-cv',      action='store_true')
+    parser.add_argument('--classifier', type=str, default='lda', 
+                        choices=['lda', 'svm'], help='Classifier type: lda or svm')
     parser.add_argument('--scaler',     type=str,   default='robust',
                         choices=['standard', 'robust', 'minmax'])
     parser.add_argument('--window',     type=float, default=0.2)
@@ -159,6 +161,7 @@ def main():
         X,
         y,
         scaler_type=args.scaler,
+        classifier_type=args.classifier,
         test_size=args.test_size,
         cv_folds=0 if args.no_cv else args.cv_folds,
         class_names=[f"Class {int(c)}" for c in unique],

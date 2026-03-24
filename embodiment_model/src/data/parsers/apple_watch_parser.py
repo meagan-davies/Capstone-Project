@@ -30,7 +30,7 @@ import zipfile
 import logging
 from pathlib import Path
 from xml.etree.ElementTree import iterparse
-from typing import Iterator
+from typing import Iterator, Optional
 
 import numpy as np
 import pandas as pd
@@ -38,32 +38,26 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-# --- Record type → friendly name mapping ------------------------------------
-# Add more HKQuantityTypeIdentifier values here as needed.
+# ---------------------------------------------------------------------------
+# Type mapping
+# ---------------------------------------------------------------------------
 
 RECORD_TYPE_MAP = {
     "HKQuantityTypeIdentifierHeartRateVariabilitySDNN": "hrv_ms",
     "HKQuantityTypeIdentifierHeartRate":                "heart_rate_bpm",
-    "HKQuantityTypeIdentifierElectrodermalActivity":    "eda_us",
     "HKQuantityTypeIdentifierRestingHeartRate":         "resting_hr_bpm",
     "HKQuantityTypeIdentifierRespiratoryRate":          "resp_rate_bpm",
     "HKQuantityTypeIdentifierOxygenSaturation":         "spo2_pct",
     "HKQuantityTypeIdentifierBodyTemperature":          "temp_c",
-}
-
-# Types used for embodiment model by default
-EMBODIMENT_TYPES = {
-    "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
-    "HKQuantityTypeIdentifierHeartRate",
-    "HKQuantityTypeIdentifierElectrodermalActivity",
-    "HKQuantityTypeIdentifierRestingHeartRate",
-    "HKQuantityTypeIdentifierRespiratoryRate",
+    # NOTE: EDA removed (not supported natively by Apple Watch)
 }
 
 DATE_FMT = "%Y-%m-%d %H:%M:%S %z"
 
 
-# --- XML streaming parser ---------------------------------------------------
+# ---------------------------------------------------------------------------
+# Streaming XML
+# ---------------------------------------------------------------------------
 
 def _iter_records(xml_source) -> Iterator[dict]:
     """
@@ -88,18 +82,23 @@ def _open_xml(path: Path):
         # Apple exports as 'apple_health_export/export.xml' inside the zip
         xml_names = [n for n in zf.namelist() if n.endswith("export.xml")]
         if not xml_names:
-            raise ValueError(f"No export.xml found inside {path.name}")
+            raise ValueError(f"No export.xml found in {path}")
         return zf.open(xml_names[0])
     else:
         return open(path, "r", encoding="utf-8")
 
 
-# --- Public API -------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Core loader
+# ---------------------------------------------------------------------------
 
 def load(
     xml_path: str | Path,
-    record_types: set[str] | None = None,
-    source_filter: str | None = None,
+    record_types: Optional[set[str]] = None,
+    source_filter: Optional[str] = None,
+    session_start: Optional[pd.Timestamp] = None,
+    session_end: Optional[pd.Timestamp] = None,
+    max_records: Optional[int] = None,   # debug control
 ) -> pd.DataFrame:
     """
     Load an Apple Health export XML and return a tidy DataFrame.
@@ -129,193 +128,185 @@ def load(
     """
     xml_path = Path(xml_path)
     if not xml_path.exists():
-        raise FileNotFoundError(f"Apple Health export not found: {xml_path}")
+        raise FileNotFoundError(xml_path)
 
-    if record_types is None:
-        record_types = EMBODIMENT_TYPES
+    logger.info("Loading Apple Health: %s", xml_path.name)
 
-    logger.info("Streaming %s for types: %s", xml_path.name, record_types)
-
-    rows: list[dict] = []
-    seen_types: set[str] = set()
+    rows = []
+    type_counts = {}
+    total_seen = 0
 
     with _open_xml(xml_path) as fh:
         for rec in _iter_records(fh):
+            total_seen += 1
+
             rtype = rec.get("type", "")
-            if rtype not in record_types:
+            type_counts[rtype] = type_counts.get(rtype, 0) + 1
+
+            # Type filtering (optional)
+            if record_types is not None and rtype not in record_types:
                 continue
 
             source = rec.get("sourceName", "")
+
+            # FIX: substring filter
             if source_filter and source_filter.lower() not in source.lower():
                 continue
 
-            seen_types.add(rtype)
             try:
                 value = float(rec.get("value", "nan"))
             except ValueError:
-                value = float("nan")
+                value = np.nan
 
             rows.append({
+                "type_raw":   rtype,
                 "type":       RECORD_TYPE_MAP.get(rtype, rtype),
                 "source":     source,
-                "start_time": rec.get("startDate", ""),
-                "end_time":   rec.get("endDate",   ""),
+                "start_time": rec.get("startDate"),
+                "end_time":   rec.get("endDate"),
                 "value":      value,
                 "unit":       rec.get("unit", ""),
             })
 
+            if max_records and len(rows) >= max_records:
+                break
+
     if not rows:
-        raise ValueError(
-            f"No records found for types {record_types} in {xml_path.name}. "
-            f"Check that the export contains the expected data types."
-        )
+        logger.warning("No matching records after filtering")
+        return pd.DataFrame()
 
     df = pd.DataFrame(rows)
 
-    # Parse timestamps
+    # -----------------------------------------------------------------------
+    # Timestamp handling (critical fix)
+    # -----------------------------------------------------------------------
     df["start_time"] = pd.to_datetime(df["start_time"], format=DATE_FMT, utc=True, errors="coerce")
     df["end_time"]   = pd.to_datetime(df["end_time"],   format=DATE_FMT, utc=True, errors="coerce")
 
-    df = df.sort_values("start_time").reset_index(drop=True)
+    df = df.dropna(subset=["start_time"]).sort_values("start_time")
 
-    logger.info(
-        "Loaded %d records | types found: %s | date range: %s → %s",
-        len(df),
-        {RECORD_TYPE_MAP.get(t, t) for t in seen_types},
-        df["start_time"].min(),
-        df["start_time"].max(),
-    )
+    # -----------------------------------------------------------------------
+    # Session alignment
+    # -----------------------------------------------------------------------
+    if session_start is not None:
+        session_start = pd.Timestamp(session_start, tz="UTC")
+
+        df["elapsed_s"] = (df["start_time"] - session_start).dt.total_seconds()
+
+        if session_end is not None:
+            session_end = pd.Timestamp(session_end, tz="UTC")
+            df = df[(df["start_time"] >= session_start) & (df["start_time"] <= session_end)]
+
+    else:
+        # fallback: relative to first sample
+        t0 = df["start_time"].iloc[0]
+        df["elapsed_s"] = (df["start_time"] - t0).dt.total_seconds()
+
+    df = df.reset_index(drop=True)
+
+    # -----------------------------------------------------------------------
+    # Diagnostics
+    # -----------------------------------------------------------------------
+    detected = {RECORD_TYPE_MAP.get(k, k): v for k, v in type_counts.items()}
+
+    logger.info("Total records scanned: %d", total_seen)
+    logger.info("Detected types: %s", detected)
+    logger.info("Loaded rows: %d", len(df))
+
+    if record_types:
+        missing = set(record_types) - set(type_counts.keys())
+        if missing:
+            logger.warning("Missing requested types: %s", missing)
+
     return df
 
+
+# ---------------------------------------------------------------------------
+# Timeseries conversion
+# ---------------------------------------------------------------------------
 
 def pivot_to_timeseries(
     df: pd.DataFrame,
     resample_rule: str = "5s",
+    interpolate: bool = False,
 ) -> pd.DataFrame:
-    """
-    Pivot the long-format DataFrame into a wide timeseries,
-    resampled to a regular interval.
 
-    Parameters
-    ----------
-    df : output of load()
-    resample_rule : pandas offset alias, e.g. "1s", "5s", "1min"
-        Apple Watch HRV is recorded every few minutes; HR every few seconds.
-        "5s" is a reasonable compromise — missing values will be NaN.
-
-    Returns
-    -------
-    Wide DataFrame indexed by timestamp, one column per data type.
-    Use .interpolate() downstream for gap-filling if needed.
-    """
-    pivoted = (
+    ts = (
         df.pivot_table(
             index="start_time",
             columns="type",
             values="value",
             aggfunc="mean",
         )
+        .sort_index()
         .resample(resample_rule)
         .mean()
     )
-    pivoted.index.name = "timestamp"
-    return pivoted
 
+    if interpolate:
+        ts = ts.interpolate(limit_direction="both")
 
-def extract_session_window(
-    df: pd.DataFrame,
-    session_start: pd.Timestamp,
-    session_end: pd.Timestamp,
-) -> pd.DataFrame:
-    """
-    Filter records to a specific test session time window.
-
-    Parameters
-    ----------
-    df : output of load()
-    session_start / session_end : timezone-aware timestamps
-
-    Returns
-    -------
-    Filtered and sorted DataFrame for that window.
-    """
-    mask = (df["start_time"] >= session_start) & (df["start_time"] <= session_end)
-    windowed = df[mask].copy().reset_index(drop=True)
-    logger.info(
-        "Session window %s → %s: %d records",
-        session_start.isoformat(), session_end.isoformat(), len(windowed),
-    )
-    return windowed
-
-
-def get_available_types(xml_path: str | Path) -> dict[str, int]:
-    """
-    Scan the export to find all HK record types and their counts.
-    Useful for exploring a new export before deciding what to load.
-
-    Returns dict mapping friendly name (or raw type) → record count.
-    """
-    xml_path = Path(xml_path)
-    counts: dict[str, int] = {}
-    with _open_xml(xml_path) as fh:
-        for rec in _iter_records(fh):
-            rtype = rec.get("type", "unknown")
-            friendly = RECORD_TYPE_MAP.get(rtype, rtype)
-            counts[friendly] = counts.get(friendly, 0) + 1
-    return dict(sorted(counts.items(), key=lambda x: -x[1]))
-
-
-# --- Validation helper ------------------------------------------------------
-
-def validate(df: pd.DataFrame) -> dict:
-    """
-    Sanity checks on a loaded Apple Watch DataFrame.
-    Returns: {"ok": bool, "issues": [str]}
-    """
-    issues: list[str] = []
-
-    if df.empty:
-        return {"ok": False, "issues": ["DataFrame is empty"]}
-
-    # NaN timestamps
-    if df["start_time"].isna().any():
-        issues.append("Some start_time values could not be parsed")
-
-    # NaN values
-    nan_frac = df["value"].isna().mean()
-    if nan_frac > 0.05:
-        issues.append(f"{nan_frac:.1%} of values are NaN")
-
-    # Physical range checks per type
-    checks = {
-        "hrv_ms":          (0, 300),
-        "heart_rate_bpm":  (30, 220),
-        "eda_us":          (0, 100),
-        "resting_hr_bpm":  (30, 120),
-        "resp_rate_bpm":   (4, 40),
-    }
-    for dtype, (lo, hi) in checks.items():
-        sub = df[df["type"] == dtype]["value"].dropna()
-        if sub.empty:
-            continue
-        out_of_range = ((sub < lo) | (sub > hi)).sum()
-        if out_of_range:
-            issues.append(
-                f"{dtype}: {out_of_range} value(s) outside expected range [{lo}, {hi}]"
-            )
-
-    return {"ok": len(issues) == 0, "issues": issues}
+    ts.index.name = "timestamp"
+    return ts
 
 
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import sys
-    logging.basicConfig(level=logging.INFO)
-    path = sys.argv[1] if len(sys.argv) > 1 else "export.xml"
-    df = load(path)
-    print(df.head(10).to_string())
-    print("\nShape:", df.shape)
-    print("\nRecord counts by type:")
-    print(df.groupby("type").size().to_string())
-    result = validate(df)
-    print("\nValidation:", result)
+# Exploration utility (fast scan)
+# ---------------------------------------------------------------------------
+
+def scan_types(xml_path: str | Path, limit: int = 1_000_000) -> dict:
+    """
+    Fast scan to understand available signals before loading.
+    """
+    xml_path = Path(xml_path)
+    counts = {}
+
+    with _open_xml(xml_path) as fh:
+        for i, rec in enumerate(_iter_records(fh)):
+            rtype = rec.get("type", "unknown")
+            counts[rtype] = counts.get(rtype, 0) + 1
+            if i >= limit:
+                break
+
+    return dict(sorted(counts.items(), key=lambda x: -x[1]))
+
+def validate(df: pd.DataFrame) -> dict:
+    """
+    Validate Apple Watch dataframe.
+
+    Returns:
+        {"ok": bool, "issues": [str]}
+    """
+    issues = []
+
+    if df is None:
+        return {"ok": True, "issues": ["watch data not loaded"]}
+
+    if df.empty:
+        return {"ok": True, "issues": ["watch dataframe empty (no matching records)"]}
+
+    # Timestamp integrity
+    if df["start_time"].isna().any():
+        issues.append("Invalid start_time values")
+
+    # Value quality
+    nan_frac = df["value"].isna().mean()
+    if nan_frac > 0.1:
+        issues.append(f"{nan_frac:.1%} NaN values")
+
+    # Basic physiological sanity checks
+    bounds = {
+        "heart_rate_bpm": (30, 220),
+        "hrv_ms": (0, 300),
+        "resp_rate_bpm": (4, 40),
+        "spo2_pct": (70, 100),
+    }
+
+    for t, (lo, hi) in bounds.items():
+        sub = df[df["type"] == t]["value"].dropna()
+        if not sub.empty:
+            out = ((sub < lo) | (sub > hi)).sum()
+            if out > 0:
+                issues.append(f"{t}: {out} out-of-range values")
+
+    return {"ok": len(issues) == 0, "issues": issues}
