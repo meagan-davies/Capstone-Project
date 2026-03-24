@@ -45,20 +45,20 @@ void moveSmooth(int targetThumb, int targetS2, int targetS3, int stepDelay) {
 }
 
 void neutral() {
-  moveSmooth(mindeg, mindeg, mindeg, 5);
+  moveSmooth(mindeg, mindeg, mindeg, 4);
 }
 
 void pinch() {
-  moveSmooth(maxthumb, servo2Pos, servo3Pos, 5); // move thumb first
+  moveSmooth(maxthumb, servo2Pos, servo3Pos, 4); // move thumb first
   delay(100);
 
-  moveSmooth(maxthumb, maxdeg, servo3Pos, 5); 
+  moveSmooth(maxthumb, maxdeg, servo3Pos, 4); 
 
-  moveSmooth(maxthumb, maxdeg, 20, 5); // keep ring/pinky semi-open
+  moveSmooth(maxthumb, maxdeg, 20, 4); // keep ring/pinky semi-open
 }
 
 void grasp() {
-  moveSmooth(maxthumb, maxdeg, maxdeg, 5);
+  moveSmooth(maxthumb, maxdeg, maxdeg, 4);
 }
 
 void move_thumb() {
@@ -126,7 +126,7 @@ void loop() {
   if (gesture != last_gesture) {
 
     moveSmooth(mindeg, mindeg, mindeg, 10);
-    delay(150);
+    delay(100);
 
     if (gesture == 0) neutral();
     else if (gesture == 1) pinch();
