@@ -75,7 +75,7 @@ def save_model_bundle(bundle: ModelBundle, metrics: Dict[str, Any], model_name: 
     metadata = {
         "model_name": model_name,
         "timestamp": datetime.now().isoformat(),
-        "model_type": model_type,
+        "model_type": bundle.classifier_type,
         "scaler_type": bundle.scaler_type,
         "feature_count": bundle.feature_count,
         "n_classes": bundle.n_classes,
