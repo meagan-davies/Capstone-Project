@@ -153,6 +153,7 @@ def main():
 
     # Polling thread
     is_running = True
+    packet_lock = Lock()
 
     def poll_loop():
         while is_running:
@@ -197,14 +198,14 @@ def main():
                     print(f"         Buffer: EMG={buf_status['emg_sample_count']}, "
                           f"IMU={buf_status['imu_sample_count']}")
             
-            time.sleep(1)
+            time.sleep(2)
 
     except KeyboardInterrupt:
         print("\n\nStopping real-time classification...")
 
     # Cleanup
     is_running = False
-    poll_thread.join(timeout=1)
+    poll_thread.join()
     client.stop_streaming()
     client.disconnect()
     

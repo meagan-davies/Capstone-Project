@@ -1,3 +1,6 @@
+/* Make sure the motors are switched ON before reflashing the code. 
+I changed zip and pinch to make the same motion. You can change it in the main loop().*/
+
 #include <Arduino.h>
 #include <Servo.h>
 
@@ -9,6 +12,7 @@ int pos;
 
 int mindeg = 0;
 int maxdeg = 180;
+int maxthumb = 90;
 
 int thumbPos = 0;
 int servo2Pos = 0;
@@ -41,28 +45,28 @@ void moveSmooth(int targetThumb, int targetS2, int targetS3, int stepDelay) {
 }
 
 void neutral() {
-  moveSmooth(mindeg, mindeg, mindeg, 10);
+  moveSmooth(mindeg, mindeg, mindeg, 5);
 }
 
 void pinch() {
-  moveSmooth(maxdeg, servo2Pos, servo3Pos, 15); // move thumb first
+  moveSmooth(maxthumb, servo2Pos, servo3Pos, 5); // move thumb first
   delay(100);
 
-  moveSmooth(maxdeg, maxdeg, servo3Pos, 15); 
+  moveSmooth(maxthumb, maxdeg, servo3Pos, 5); 
 
-  moveSmooth(maxdeg, maxdeg, 20, 15); // keep ring/pinky semi-open
+  moveSmooth(maxthumb, maxdeg, 20, 5); // keep ring/pinky semi-open
 }
 
 void grasp() {
-  moveSmooth(maxdeg, maxdeg, maxdeg, 10);
+  moveSmooth(maxthumb, maxdeg, maxdeg, 5);
 }
 
 void move_thumb() {
-    for (pos = mindeg; pos <= maxdeg; pos += 1) {
+    for (pos = mindeg; pos <= maxthumb; pos += 1) {
     thumb.write(pos);
     delay(15);
   }
-  for (pos = maxdeg; pos >= mindeg; pos -= 1) {
+  for (pos = maxthumb; pos >= mindeg; pos -= 1) {
     thumb.write(pos);
     delay(15);
   }
