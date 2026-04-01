@@ -25,25 +25,18 @@ Leap Motion → Control Accuracy Metrics
 BioRadio + Apple Watch + Leap → Embodiment Regression → Real-Time Score (0–100)
 ```
 
-Shared utilities handle:
-- Signal processing
-- Windowing
-- Sensor synchronization
-- Cross-validation
-- Control accuracy metrics
-
 ---
 
 ## Repository Structure
 ```
 Capstone-Project/
+├── docs/                    # Main feature usage explained
 ├── shared/                  # Sensor interfaces & utilities
 ├── prosthetic_control/      # Gesture classification system
 ├── embodiment_model/        # Embodiment regression system
 ├── integration/             # Combined system execution
 ├── data/                    # Raw and processed data (gitignored)
-├── artifacts/               # Saved models (gitignored)
-└── notebooks/               # Analysis notebooks
+└── artifacts/               # Saved models (gitignored)
 ```
 
 ---
@@ -64,12 +57,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 
 ### 3. Install dependencies
 ```bash
-pip install -e .
-```
-
-Optional (for exact reproducibility):
-```bash
-pip freeze > requirements.txt
+pip install -r requirements.txt
 ```
 
 ---
@@ -128,12 +116,10 @@ The score is computed from:
 ### Prosthetic Control
 - **Sensors**: Delsys Trigno (8 EMG channels + IMU)
 - **Gestures**: Neutral, Pinching, Grasping, Zipping
-- **Protocol**: See [prosthetic_control/docs/data_collection_protocol.md](prosthetic_control/docs/data_collection_protocol.md)
 
 ### Embodiment
 - **Sensors**: BioRadio (EDA), Apple Watch, Leap Motion
 - **Conditions**: Varying control accuracy (baseline, lag, jitter)
-- **Protocol**: See [embodiment_model/docs/data_collection_protocol.md](embodiment_model/docs/data_collection_protocol.md)
 
 Raw and processed data are excluded from version control. To reproduce experiments, place datasets inside:
 ```
@@ -180,22 +166,7 @@ data/raw/embodiment/
 - [Prosthetic Control README](./prosthetic_control/README.md)
 - [Embodiment Model README](./embodiment_model/README.md)
 - [Installation Guide](./docs/installation.md)
-- [API Reference](./docs/api_reference.md)
 
----
-
-## Testing
-
-Run all tests:
-```bash
-pytest
-```
-
-Run specific module tests:
-```bash
-pytest prosthetic_control/tests/
-pytest embodiment_model/tests/
-```
 ---
 
 ### Project structure follows:
@@ -217,7 +188,6 @@ University of Calgary
 ## Notes
 
 - Real-time performance target: <100 ms latency (prosthetic control)
-- Multimodal synchronization handled in `shared/synchronization.py`
 - Models saved in `artifacts/` (excluded from version control)
 - Leave-One-Subject-Out cross-validation ensures generalization
 - Feature importance analysis available in notebooks
@@ -226,4 +196,4 @@ University of Calgary
 
 - Delsys Inc. for Trigno API access
 - University of Calgary Biomedical Engineering department
-- Capstone supervisors and advisors
+- HERO Lab, capstone supervisor Dr. Junho Park and advisors

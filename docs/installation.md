@@ -9,8 +9,7 @@
 ## Step 1: Clone Repository
 
 ```bash
-git clone <your-repo-url>
-cd emg-prosthetic-control
+git clone <https://github.com/meagan-davies/Capstone-Project.git>
 ```
 
 ## Step 2: Create Virtual Environment
@@ -87,12 +86,6 @@ pip install pythonnet
 
 ### "DelsysAPI.dll not found"
 Make sure you copied the files to `resources/DelsysAPI/`
-
-### "Import Error: No module named 'src'"
-Make sure you're in the project root directory:
-```bash
-cd emg-prosthetic-control
-```
 
 ## Next Steps
 

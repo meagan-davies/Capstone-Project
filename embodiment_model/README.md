@@ -6,7 +6,7 @@ Multi-sensor regression model for quantifying sense of embodiment during prosthe
 
 This model predicts embodiment scores (0-100) from multimodal sensor data:
 - **Leap Motion**: Hand tracking and control accuracy
-- **BioRadio**: EMG, ECG, EDA biosignals
+- **BioRadio**: EDA biosignals
 - **Apple Watch**: Heart rate, HRV, motion
 
 ## Features
@@ -25,7 +25,7 @@ See main [README.md](../README.md) for installation instructions.
 
 ### Train Model
 ```bash
-python scripts/train_model.py \
+python embodiment_model/scripts/train_model.py \
     --data-dir ../data/raw/embodiment \
     --model-type ridge \
     --output ../artifacts/embodiment_model
@@ -33,17 +33,9 @@ python scripts/train_model.py \
 
 ### Evaluate Model
 ```bash
-python scripts/evaluate_model.py \
+python embodiment_model/scripts/evaluate_model.py \
     --model-path ../artifacts/embodiment_model/model.pkl \
     --test-data ../data/raw/embodiment/test
-```
-
-### Collect Data
-```bash
-python scripts/collect_data.py \
-    --participant-id P01 \
-    --condition baseline \
-    --output ../data/raw/embodiment
 ```
 
 ## Model Architecture
@@ -57,9 +49,7 @@ python scripts/collect_data.py \
 
 2. **Physiological** (BioRadio + Apple Watch)
    - Heart rate variability (HRV)
-   - EMG activation patterns
    - EDA arousal levels
-   - Cross-sensor synchrony
 
 ### Model Types
 - **Ridge Regression** (default): Interpretable, fast
@@ -104,30 +94,51 @@ validation:
 data/raw/embodiment/
 └── YYYYMMDD/
     └── P01/
-        └── condition_baseline/
-            ├── trial_001_leap.csv
-            ├── trial_001_bioradio.csv
-            ├── trial_001_watch.csv
+        └── P01_pre_trial001/            # Ground Truth Before
+            ├── P01_1_bioradio
+            ├── P01_1_leapmotion
+            ├── P01_1_watch
+            ├── P01_2_bioradio
+            ├── P01_2_leapmotion
+            ├── P01_2_watch
+            ├── P01_3_bioradio
+            ├── P01_3_leapmotion
+            ├── P01_3_watch
+            └── trial_001_labels.json
+        └── P01_pros_trial001/            # Prosthetic
+            ├── P01_1_bioradio
+            ├── P01_1_leapmotion
+            ├── P01_1_watch
+            ├── P01_2_bioradio
+            ├── P01_2_leapmotion
+            ├── P01_2_watch
+            ├── P01_3_bioradio
+            ├── P01_3_leapmotion
+            ├── P01_3_watch
+            └── trial_001_labels.json
+        └── P01_post_trial001/            # Ground Truth After
+            ├── P01_1_bioradio
+            ├── P01_1_leapmotion
+            ├── P01_1_watch
+            ├── P01_2_bioradio
+            ├── P01_2_leapmotion
+            ├── P01_2_watch
+            ├── P01_3_bioradio
+            ├── P01_3_leapmotion
+            ├── P01_3_watch
             └── trial_001_labels.json
 ```
 
 ### Labels (trial_001_labels.json)
 ```json
 {
-    "participant_id": "P01",
-    "condition": "baseline",
-    "trial_number": 1,
-    "embodiment_score": 75,
-    "veq_ownership": 6,
-    "veq_agency": 5,
-    "veq_location": 6,
-    "timestamp": "2025-03-05T10:30:00"
+  "participant_id":   "P01",
+  "condition":        "pre",
+  "trial_number":     1,
+  "embodiment_score": 100.0,
+  "session_start":    "2026-01-27T20:33:16+00:00",
+  "session_end":      "2026-01-27T20:33:25+00:00"
 }
-```
-
-## Testing
-```bash
-pytest tests/
 ```
 
 ## Performance
@@ -136,9 +147,3 @@ Expected metrics (LOSO-CV):
 - R²: 0.50-0.70
 - MAE: 8-12 points
 - RMSE: 10-15 points
-
-## Documentation
-
-- [Data Collection Protocol](docs/data_collection_protocol.md)
-- [Feature Engineering](docs/features.md)
-- [Model Architecture](docs/model_architecture.md)
