@@ -92,44 +92,45 @@ validation:
 ### Input
 ```
 data/raw/embodiment/
-└── YYYYMMDD/
-    └── P01/
-        └── P01_pre_trial001/            # Ground Truth Before
-            ├── P01_1_bioradio
-            ├── P01_1_leapmotion
-            ├── P01_1_watch
-            ├── P01_2_bioradio
-            ├── P01_2_leapmotion
-            ├── P01_2_watch
-            ├── P01_3_bioradio
-            ├── P01_3_leapmotion
-            ├── P01_3_watch
-            └── trial_001_labels.json
-        └── P01_pros_trial001/            # Prosthetic
-            ├── P01_1_bioradio
-            ├── P01_1_leapmotion
-            ├── P01_1_watch
-            ├── P01_2_bioradio
-            ├── P01_2_leapmotion
-            ├── P01_2_watch
-            ├── P01_3_bioradio
-            ├── P01_3_leapmotion
-            ├── P01_3_watch
-            └── trial_001_labels.json
-        └── P01_post_trial001/            # Ground Truth After
-            ├── P01_1_bioradio
-            ├── P01_1_leapmotion
-            ├── P01_1_watch
-            ├── P01_2_bioradio
-            ├── P01_2_leapmotion
-            ├── P01_2_watch
-            ├── P01_3_bioradio
-            ├── P01_3_leapmotion
-            ├── P01_3_watch
-            └── trial_001_labels.json
+  └── T01_pre_trial001/            # Ground Truth Before for Grasp Test
+      ├── labels.json
+      ├── T01_1_bioradio.bcrx
+      └── T01_1_leapmotion.csv
+  └── T01_pre_trial002/            # Ground Truth Before for Zip Test
+      ├── labels.json
+      ├── T01_2_bioradio.bcrx
+      └── T01_2_leapmotion.csv
+  └── T01_pre_trial003/            # Ground Truth Before for Block Test
+      ├── labels.json
+      ├── T01_3_bioradio.bcrx
+      └── T01_3_leapmotion.csv
+  └── T01_pros_trial001/            # Prosthetic for Grasp Test
+      ├── labels.json
+      ├── P01_1_bioradio.bcrx
+      └── P01_1_leapmotion.csv
+  └── T01_pros_trial002/            # Prosthetic for Zip Test
+      ├── labels.json
+      ├── P01_2_bioradio.bcrx
+      └── P01_2_leapmotion.csv
+  └── T01_pros_trial003/            # Prosthetic for Block Test
+      ├── labels.json
+      ├── P01_3_bioradio.bcrx
+      └── P01_3_leapmotion.csv
+  └── P01_post_trial001/            # Ground Truth After for Grasp Test
+      ├── labels.json
+      ├── P01_1_bioradio.bcrx
+      └── P01_1_leapmotion.csv
+  └── P01_post_trial002/            # Ground Truth After for Zip Test
+      ├── labels.json
+      ├── P01_2_bioradio.bcrx
+      └── P01_2_leapmotion.csv
+  └── P01_post_trial003/            # Ground Truth After for Block Test
+      ├── labels.json
+      ├── P01_3_bioradio.bcrx
+      └── P01_3_leapmotion.csv
 ```
 
-### Labels (trial_001_labels.json)
+### Labels (labels.json)
 ```json
 {
   "participant_id":   "P01",
@@ -137,7 +138,8 @@ data/raw/embodiment/
   "trial_number":     1,
   "embodiment_score": 100.0,
   "session_start":    "2026-01-27T20:33:16+00:00",
-  "session_end":      "2026-01-27T20:33:25+00:00"
+  "session_end":      "2026-01-27T20:33:25+00:00",
+  "questionnaire":    80
 }
 ```
 
