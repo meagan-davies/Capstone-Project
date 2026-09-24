@@ -83,7 +83,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_RESAMPLE_HZ   = 1          # target grid: 1 row per second
 DEFAULT_WINDOW_S      = 1.0        # aggregation window per row (same as 1/resample)
 DEFAULT_MAX_GAP_S     = 30         # forward-fill watch data up to this many seconds
-WATCH_RESAMPLE_RULE   = "1s"       # pandas offset alias for watch resampling
+RESAMPLE_RULE   = "1s"             # pandas offset alias for resampling
 
 # Watch metric columns we want to carry forward (must match apple_watch_parser type names)
 WATCH_METRICS = ["hrv_ms", "heart_rate_bpm"]
@@ -98,19 +98,22 @@ class AlignedDataset:
     """
     Output of build_feature_matrix().
 
-    Attributes
-    ----------
-    features    : wide DataFrame, one row per second, ready for the regressor
-    qc          : quality-control report (gaps, coverage per source)
-    session_id  : from EmbodimentSession.session_id
-    label       : embodiment_score  (target variable)
-    veq_scores  : raw VEQ questionnaire responses (optional)
+    features:
+        Time-aligned sensor-derived features.
+
+    label:
+        Task-level freeze-check embodiment score. This is the ML target.
+
+    questionnaire_score:
+        Post-test questionnaire score retained as metadata. It is NOT
+        included in the model features.
     """
-    features:   pd.DataFrame
-    qc:         dict
+
+    features: pd.DataFrame
+    qc: dict
     session_id: str
-    label:      float
-    veq_scores: Optional[dict] = field(default_factory=dict)
+    label: float
+    questionnaire_score: Optional[float] = None
 
     def __repr__(self) -> str:
         return (
@@ -147,7 +150,7 @@ def _bioradio_to_grid(
     ts.index = pd.to_datetime(ts.index, utc=True)
 
     # Resample to 1-second windows
-    rs = ts.resample(WATCH_RESAMPLE_RULE)
+    rs = ts.resample(RESAMPLE_RULE)
     bio_grid = pd.DataFrame({
         "eda_mean": rs.mean(),
         "eda_std":  rs.std().fillna(0),
@@ -186,7 +189,7 @@ def _leap_to_grid(
     leap_df = leap_df.copy()
     leap_df["palm_speed"] = speed
 
-    rs = leap_df.resample(WATCH_RESAMPLE_RULE)
+    rs = leap_df.resample(RESAMPLE_RULE)
 
     leap_grid = pd.DataFrame({
         "pinch_mean":       rs["pinch"].mean(),
@@ -261,7 +264,7 @@ def _watch_to_grid(
 
         sub = sub.set_index("start_time")["value"]
         sub.index = pd.to_datetime(sub.index, utc=True)
-        resampled = sub.resample(WATCH_RESAMPLE_RULE).mean()
+        resampled = sub.resample(RESAMPLE_RULE).mean()
         # Forward-fill (sparse sensor — reading lasts until the next one)
         resampled = resampled.reindex(grid).ffill(limit=max_gap_s)
         frames.append(resampled.rename(metric))
@@ -372,8 +375,8 @@ def build_feature_matrix(
         features=features,
         qc=qc,
         session_id=session.session_id,
-        label=session.embodiment_score,
-        veq_scores=session.veq_scores,
+        label=session.freeze_check_score,
+        questionnaire_score=session.questionnaire_score,
     )
 
 
@@ -382,7 +385,7 @@ def build_training_dataset(
     resample_hz: int = DEFAULT_RESAMPLE_HZ,
     max_gap_s:   int = DEFAULT_MAX_GAP_S,
     drop_na_threshold: float = 0.5,
-) -> tuple[pd.DataFrame, pd.Series]:
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Build X (features) and y (labels) from a list of sessions for model training.
 
@@ -404,6 +407,7 @@ def build_training_dataset(
     rows   : list[pd.Series] = []
     labels : list[float]     = []
     ids    : list[str]        = []
+    metadata = []
 
     for session in sessions:
         try:
@@ -419,11 +423,23 @@ def build_training_dataset(
         labels.append(ds.label)
         ids.append(ds.session_id)
 
+        metadata.append({
+            "session_id": session.session_id,
+            "participant_id": session.participant_id,
+            "condition": session.condition,
+            "condition_label": session.condition_label,
+            "trial_number": session.trial_number,
+            "task": session.task_label,
+            "freeze_check_score": session.freeze_check_score,
+            "questionnaire_score": session.questionnaire_score,
+        })
+
     if not rows:
         raise ValueError("No sessions could be processed — check logs for errors")
 
     X = pd.DataFrame(rows, index=ids)
-    y = pd.Series(labels, index=ids, name="embodiment_score")
+    y = pd.Series(labels, index=ids, name="freeze_check_score")
+    metadata = pd.DataFrame(metadata, index=ids)
 
     # Drop columns with too many NaNs (e.g. watch data not yet available)
     nan_fracs = X.isna().mean()
@@ -433,7 +449,7 @@ def build_training_dataset(
         X = X.drop(columns=drop_cols)
 
     logger.info("Training dataset: X=%s, y=%s", X.shape, y.shape)
-    return X, y
+    return X, y, metadata
 
 
 # ---------------------------------------------------------------------------

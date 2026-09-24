@@ -66,9 +66,9 @@ def main(args):
 
     # ── Feature matrix ────────────────────────────────────────────────────
     print("\nBuilding feature matrix...")
-    X, y = build_training_dataset(sessions)
+    X, y, metadata = build_training_dataset(sessions)
 
-    participant_ids = [s.participant_id for s in sessions if s.session_id in X.index]
+    participant_ids = metadata["participant_id"].to_numpy()
     feature_names   = list(X.columns)
 
     print(f"✓ {X.shape[0]} sessions × {X.shape[1]} features")

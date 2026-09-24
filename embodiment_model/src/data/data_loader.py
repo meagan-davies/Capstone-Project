@@ -1,38 +1,36 @@
 """
 data_loader.py
 --------------
-Loads a post-session embodiment recording from disk by calling the three
-sensor parsers (bioradio, leap_motion, apple_watch) on the raw source files.
+Loads one embodiment trial/session from disk using the BioRadio, Leap Motion,
+and optional Apple Watch parsers.
 
 Expected session directory layout
 ----------------------------------
 data/
   raw/
     embodiment/
-      <session_id>/                    e.g.  P01_control_trial001/
-        <any_name>.bcrx                      bioradio recording
-        <any_name>_leap.csv                  leap motion export (must contain "leap")
-        <any_name>_watch.xml  (or .zip)      apple health export (optional)
-        labels.json                          ground truth + metadata
-  processed/
-    embodiment/
       <session_id>/
-        feature_matrix.csv                   output of dataset_builder (regeneratable)
-        session_report.json                  QC report + timing
+        <any_name>.bcrx
+        <any_name>_leap.csv
+        <any_name>_watch.xml  (optional)
+        labels.json
 
 labels.json schema
--------------------
+------------------
 {
-  "participant_id":  "P01",
-  "condition":       "control",          // e.g. "control", "vibrotactile", "visual"
-  "trial_number":    1,
-  "embodiment_score": 72.5,             // 0-100 continuous ground truth
-  "veq_ownership":   4,                 // optional Likert items
-  "veq_agency":      3,
-  "veq_location":    5,
-  "session_start":   "2026-01-27T13:33:16+00:00",   // ISO-8601, used to align watch data
-  "session_end":     "2026-01-27T13:43:16+00:00",
-  "notes":           ""
+  "participant_id": "T01",
+  "condition": "post",             // pre, pros, or post
+  "trial_number": 1,               // 1=Grasp, 2=Zip, 3=Block
+  "embodiment_score": 100,         // task-level freeze-check score
+  "session_start": "2026-04-08T13:52:11+00:00",
+  "session_end": "2026-04-08T13:52:33+00:00",
+  "questionnaire": 47,             // post-test questionnaire score
+  "notes": ""
+}
+
+The questionnaire score is retained as metadata and is NOT used as a
+predictor in the embodiment model.
+
 }
 """
 
@@ -52,6 +50,17 @@ from .parsers import bioradio_parser, leapmotion_parser, apple_watch_parser
 
 logger = logging.getLogger(__name__)
 
+CONDITION_LABELS = {
+    "pre": "Biological Before",
+    "pros": "Prosthetic",
+    "post": "Biological After",
+}
+
+TASK_LABELS = {
+    1: "Grasp",
+    2: "Zip",
+    3: "Block",
+}
 
 # ---------------------------------------------------------------------------
 # Session dataclass
@@ -60,49 +69,73 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EmbodimentSession:
     """
-    One complete post-session recording.
+    One complete embodiment trial/session.
 
-    Sensor DataFrames are stored as returned by the parsers — no pre-processing.
-    dataset_builder.py is responsible for time-alignment and feature extraction.
+    Each session corresponds to one participant, condition, and task.
+    The embodiment_score is the freeze-check score collected for that
+    specific task.
 
     Attributes
     ----------
-    participant_id  : e.g. "P01"
-    condition       : experimental condition label
-    trial_number    : integer trial index within a participant
-    session_dir     : original source directory (for traceability)
+    participant_id (str): Unique participant identifier, e.g. ``"P08"``.
 
-    leap_df         : DataFrame from leapmotion_parser.load()
-                      columns: frame, elapsed_s, [timestamp], pinch, grab,
-                               palm_tx/ty/tz, palm_rx/ry/rz, vel_x/y/z, ...
-    bioradio_df     : DataFrame from bioradio_parser.load()
-                      columns: timestamp, elapsed_s, <channel_name> (e.g. SKN µS)
-    watch_df        : DataFrame from apple_watch_parser.load()   (None until available)
-                      columns: type, source, start_time, end_time, value, unit
+    condition (str): Experimental condition. Expected values are:
+        ``"pre"`` for Biological Before,
+        ``"pros"`` for Prosthetic, and
+        ``"post"`` for Biological After.
 
-    embodiment_score : continuous [0, 100] ground truth
-    veq_scores       : dict with keys ownership / agency / location  (optional)
-    session_start    : timezone-aware datetime parsed from labels.json
-    session_end      : timezone-aware datetime parsed from labels.json
+    trial_number (int): Task identifier within the experiment:
+        ``1`` = Grasp, ``2`` = Zip, ``3`` = Block.
+
+    session_dir (Path): Path to the raw session directory. Retained for traceability and
+        access to the original source files.
+
+    leap_df (DataFrame): Parsed Leap Motion recording. Contains frame-level hand and movement
+        measurements such as pinch strength, grab strength, palm position,
+        orientation, and velocity.
+
+    bioradio_df (DataFrame): Parsed BioRadio recording. Contains timestamped physiological
+        measurements, including skin conductance / electrodermal activity.
+
+    watch_df (DataFrame): Optional parsed Apple Watch recording. Contains timestamped Apple
+        Health measurements when an Apple Watch export is available.
+        ``None`` when no Apple Watch data were collected.
+
+    freeze_check_score (float): Task-level embodiment score obtained from the freeze-check questions
+        administered after the task. This is the ground-truth target used
+        for machine-learning prediction.
+
+    questionnaire_score (float): Score from the post-test embodiment questionnaire. This is retained
+        as metadata for analysis and reporting and is not used as a model
+        input feature.
+
+    session_start (datetime): Time at which the recording session began. Expected to be a
+        timezone-aware datetime parsed from the ISO-8601 value in ``labels.json``.
+
+    session_end (datetime): Time at which the recording session ended. Expected to be a
+        timezone-aware datetime parsed from the ISO-8601 value in ``labels.json``.
+
+    notes (str): Optional free-text notes associated with the session
     """
+
     # Identity
     participant_id: str
-    condition:      str
-    trial_number:   int
-    session_dir:    Path
+    condition: str
+    trial_number: int
+    session_dir: Path
 
-    # Raw sensor DataFrames (as-loaded from parsers)
-    leap_df:      pd.DataFrame
-    bioradio_df:  pd.DataFrame
-    watch_df:     Optional[pd.DataFrame]
+    # Raw sensor DataFrames
+    leap_df: pd.DataFrame
+    bioradio_df: pd.DataFrame
+    watch_df: Optional[pd.DataFrame]
 
-    # Ground truth
-    embodiment_score: float
-    veq_scores:       Optional[dict] = field(default_factory=dict)
+    # Ground truth / metadata
+    freeze_check_score: float
+    questionnaire_score: Optional[float] = None
 
     # Timing
     session_start: Optional[datetime] = None
-    session_end:   Optional[datetime] = None
+    session_end: Optional[datetime] = None
 
     # Free-text
     notes: str = ""
@@ -110,6 +143,14 @@ class EmbodimentSession:
     # ------------------------------------------------------------------
     # Convenience properties
     # ------------------------------------------------------------------
+
+    @property
+    def condition_label(self) -> str:
+        return CONDITION_LABELS.get(self.condition, self.condition)
+
+    @property
+    def task_label(self) -> str:
+        return TASK_LABELS.get(self.trial_number, f"Unknown ({self.trial_number})")
 
     @property
     def duration_s(self) -> Optional[float]:
@@ -122,11 +163,25 @@ class EmbodimentSession:
         return f"{self.participant_id}_{self.condition}_trial{self.trial_number:03d}"
 
     def __repr__(self) -> str:
-        watch_status = f"{len(self.watch_df)} records" if self.watch_df is not None else "not loaded"
+        watch_status = (
+            f"{len(self.watch_df)} records"
+            if self.watch_df is not None
+            else "not loaded"
+        )
+
+        questionnaire = (
+            f"{self.questionnaire_score:.1f}"
+            if self.questionnaire_score is not None
+            else "None"
+        )
+
         return (
             f"EmbodimentSession("
             f"id={self.session_id!r}, "
-            f"score={self.embodiment_score:.1f}, "
+            f"condition={self.condition_label!r}, "
+            f"task={self.task_label!r}, "
+            f"freeze_check={self.freeze_check_score:.1f}, "
+            f"questionnaire={questionnaire}, "
             f"leap={len(self.leap_df)} frames, "
             f"bioradio={len(self.bioradio_df)} samples, "
             f"watch={watch_status})"
@@ -203,6 +258,25 @@ def load_session(
     with open(labels_path) as f:
         labels = json.load(f)
 
+    VALID_CONDITIONS = {"pre", "pros", "post"}
+    VALID_TASKS = {1, 2, 3}
+
+    condition = labels["condition"].lower()
+
+    if condition not in VALID_CONDITIONS:
+        raise ValueError(
+            f"Invalid condition {condition!r} in {labels_path}. "
+            f"Expected one of {sorted(VALID_CONDITIONS)}."
+        )
+
+    trial_number = int(labels["trial_number"])
+
+    if trial_number not in VALID_TASKS:
+        raise ValueError(
+            f"Invalid trial_number {trial_number} in {labels_path}. "
+            f"Expected one of {sorted(VALID_TASKS)}."
+        )
+
     session_start = _parse_dt(labels.get("session_start"))
     session_end   = _parse_dt(labels.get("session_end"))
 
@@ -265,12 +339,12 @@ def load_session(
         leap_df=leap_df,
         bioradio_df=bioradio_df,
         watch_df=watch_df,
-        embodiment_score=float(labels["embodiment_score"]),
-        veq_scores={
-            "ownership": labels.get("veq_ownership"),
-            "agency":    labels.get("veq_agency"),
-            "location":  labels.get("veq_location"),
-        },
+        freeze_check_score=float(labels["embodiment_score"]),
+        questionnaire_score=(
+            float(labels["questionnaire"])
+            if labels.get("questionnaire") is not None
+            else None
+        ),
         session_start=session_start,
         session_end=session_end,
         notes=labels.get("notes", ""),
@@ -367,18 +441,28 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
 
 def validate_session(session: EmbodimentSession) -> dict:
     """
-    Run all three parser validators and combine results.
+    Run validators for all available sensor sources.
 
-    Returns
-    -------
-    {"ok": bool, "issues": {"leap": [...], "bioradio": [...], "watch": [...]}}
+    Apple Watch validation is performed only when Watch data are present.
     """
+
     results = {
-        "leap":     leapmotion_parser.validate(session.leap_df),
+        "leap": leapmotion_parser.validate(session.leap_df),
         "bioradio": bioradio_parser.validate(session.bioradio_df),
-        "watch":    apple_watch_parser.validate(session.watch_df)
-                    if session.watch_df is not None
-                    else {"ok": True, "issues": ["watch data not loaded"]},
     }
+
+    if session.watch_df is not None:
+        results["watch"] = apple_watch_parser.validate(session.watch_df)
+    else:
+        results["watch"] = {
+            "ok": True,
+            "issues": [],
+            "status": "not_available",
+        }
+
     all_ok = all(r["ok"] for r in results.values())
-    return {"ok": all_ok, "results": results}
+
+    return {
+        "ok": all_ok,
+        "results": results,
+    }
