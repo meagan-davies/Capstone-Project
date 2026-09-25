@@ -1,9 +1,11 @@
 """
+regressor.py
+---
 Embodiment regression models
 """
 
 import numpy as np
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.linear_model import Ridge, Lasso, ElasticNet, LassoCV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
@@ -194,48 +196,135 @@ class EmbodimentRegressor:
         return formula
 
 
-def select_features_lasso(X: np.ndarray, 
-                         y: np.ndarray, 
-                         feature_names: list,
-                         n_features: int = 30) -> Tuple[np.ndarray, list]:
+def get_lasso_feature_mask(
+    X_scaled: np.ndarray,
+    y: np.ndarray,
+    n_features: int = 30,
+    cv: int = 5
+) -> np.ndarray:
     """
-    Select features using Lasso regression
-    
+    Determine which features to retain using LassoCV.
+
+    This function assumes that X_scaled has already been
+    standardized using statistics calculated from the training
+    data only.
+
+    This function is intended for use inside cross-validation,
+    where feature selection must be performed independently
+    within each training fold.
+
     Args:
-        X: Feature matrix
-        y: Target values
-        feature_names: List of feature names
-        n_features: Target number of features
-    
+        X_scaled: Standardized training feature matrix.
+        y: Training target values.
+        n_features: Maximum number of features to retain.
+        cv: Number of folds for LassoCV.
+
     Returns:
-        Tuple of (selected_X, selected_feature_names)
+        Boolean mask indicating which features should be retained.
     """
-    from sklearn.linear_model import LassoCV
-    
-    # TODO: check scaling here makes sense and isn't introducing odd redundancy
-    # Standardize
+
+    # Fit LassoCV using only the training data.
+    lasso_cv = LassoCV(
+        cv=cv,
+        random_state=42,
+        max_iter=10000
+    )
+
+    lasso_cv.fit(X_scaled, y)
+
+    # Identify features with non-zero Lasso coefficients.
+    nonzero_mask = lasso_cv.coef_ != 0
+    n_selected = np.sum(nonzero_mask)
+
+    # If Lasso selected more features than desired,
+    # keep the features with the largest absolute coefficients.
+    if n_selected > n_features:
+
+        coef_abs = np.abs(lasso_cv.coef_)
+
+        top_indices = np.argsort(coef_abs)[::-1][:n_features]
+
+        mask = np.zeros(X_scaled.shape[1], dtype=bool)
+        mask[top_indices] = True
+
+    # If Lasso selected some features, keep those features.
+    elif n_selected > 0:
+
+        mask = nonzero_mask
+
+    # If Lasso selected no features, retain the top n_features
+    # according to coefficient magnitude.
+    else:
+
+        coef_abs = np.abs(lasso_cv.coef_)
+
+        n_to_keep = min(
+            n_features,
+            X_scaled.shape[1]
+        )
+
+        top_indices = np.argsort(coef_abs)[::-1][:n_to_keep]
+
+        mask = np.zeros(X_scaled.shape[1], dtype=bool)
+        mask[top_indices] = True
+
+    return mask
+
+
+def select_features_lasso(
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: list,
+    n_features: int = 30
+) -> Tuple[np.ndarray, list]:
+    """
+    Select features using Lasso regression.
+
+    This function is intended for fitting the final model after
+    cross-validation has been completed.
+
+    For LOSO cross-validation, use get_lasso_feature_mask()
+    instead so that feature selection can be performed using
+    only the training data within each fold.
+
+    Args:
+        X: Feature matrix.
+        y: Target values.
+        feature_names: List of feature names.
+        n_features: Maximum number of features to retain.
+
+    Returns:
+        Tuple containing:
+            - X_selected: Feature matrix containing selected features.
+            - selected_names: Names of selected features.
+    """
+
+    # Standardize the data for Lasso feature selection.
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    
-    # Fit LassoCV to find optimal alpha
-    lasso_cv = LassoCV(cv=5, random_state=42, max_iter=10000)
-    lasso_cv.fit(X_scaled, y)
-    
-    # Get non-zero coefficients
-    nonzero_mask = lasso_cv.coef_ != 0
-    
-    # If too many features, select top ones by coefficient magnitude
-    if np.sum(nonzero_mask) > n_features:
-        coef_abs = np.abs(lasso_cv.coef_)
-        top_indices = np.argsort(coef_abs)[::-1][:n_features]
-        mask = np.zeros(len(feature_names), dtype=bool)
-        mask[top_indices] = True
-    else:
-        mask = nonzero_mask
-    
+
+    # Determine which features to retain.
+    mask = get_lasso_feature_mask(
+        X_scaled,
+        y,
+        n_features=n_features,
+        cv=5
+    )
+
+    # Apply the selected feature mask to the ORIGINAL
+    # (unscaled) feature matrix.
     X_selected = X[:, mask]
-    selected_names = [name for name, keep in zip(feature_names, mask) if keep]
-    
-    print(f"Lasso feature selection: {len(selected_names)}/{len(feature_names)} features selected")
-    
+
+    selected_names = [
+        name
+        for name, keep in zip(feature_names, mask)
+        if keep
+    ]
+
+    print(
+        f"Lasso feature selection: "
+        f"{len(selected_names)}/{len(feature_names)} "
+        f"features selected"
+    )
+
     return X_selected, selected_names

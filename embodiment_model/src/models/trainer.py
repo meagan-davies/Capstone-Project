@@ -1,4 +1,6 @@
 """
+trainer.py
+---
 Model training utilities
 """
 
@@ -46,27 +48,27 @@ def train_embodiment_model(X: np.ndarray,
     print(f"Participants: {len(np.unique(participant_ids))}")
     print(f"Embodiment range: [{y.min():.1f}, {y.max():.1f}]")
     
-    # Feature selection
-    X_train = X
-    selected_feature_names = feature_names
-    
-    if feature_selection and X.shape[1] > n_features:
-        print(f"\nPerforming feature selection (target: {n_features} features)...")
-        X_train, selected_feature_names = select_features_lasso(
-            X, y, feature_names, n_features
-        )
-        print(f"Selected features: {len(selected_feature_names)}")
-    
     # Create model
     model = EmbodimentRegressor(model_type=model_type, **model_params)
     
     # Cross-validation
     print(f"\nRunning Leave-One-Subject-Out Cross-Validation...")
-    cv_results = leave_one_subject_out_cv(model.model, X_train, y, participant_ids)
+    cv_results = leave_one_subject_out_cv(model.model, X, y, participant_ids, feature_names=feature_names, feature_selection=feature_selection, n_features=n_features)
     
     # Train final model on all data
     print(f"\nTraining final model on all data...")
-    model.fit(X_train, y, feature_names=selected_feature_names)
+
+    X_final = X
+    selected_feature_names = feature_names
+
+    if feature_selection and X.shape[1] > n_features:
+        print(f"\nPerforming feature selection for final model (target: {n_features} features)...")
+        X_final, selected_feature_names = select_features_lasso(
+            X, y, feature_names, n_features
+        )
+        print(f"Selected features: {len(selected_feature_names)}")
+
+    model.fit(X_final, y, feature_names=selected_feature_names)
     
     # Feature importance
     importance = model.get_feature_importance()
