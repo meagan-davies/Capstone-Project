@@ -429,11 +429,20 @@ def load_sessions(
 # ---------------------------------------------------------------------------
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO-8601 string to a timezone-aware datetime, or return None."""
+    """Parse an ISO-8601 datetime, treating labels as Calgary local time."""
     if not value:
         return None
+
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        # labels.json stores Calgary clock time but may be marked +00:00.
+        # Reinterpret the clock time as Mountain Time rather than converting it.
+        if dt.tzinfo is not None:
+            from zoneinfo import ZoneInfo
+            dt = dt.replace(tzinfo=ZoneInfo("America/Edmonton"))
+
+        return dt
+
     except ValueError:
         logger.warning("Could not parse datetime: %r", value)
         return None
