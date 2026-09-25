@@ -22,6 +22,7 @@ Thumbs.db
 data/raw/
 data/processed/
 artifacts/
+embodiment_model/analysis/data_summary/
 
 # Logs
 *.log

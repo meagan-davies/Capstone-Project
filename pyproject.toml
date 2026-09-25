@@ -19,6 +19,7 @@ dependencies = [
     "matplotlib",
     "joblib",
     "pyyaml",
+    "openpyxl"
 ]
 
 [tool.setuptools.packages.find]

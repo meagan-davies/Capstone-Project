@@ -10,12 +10,13 @@ Output columns:
     (one prediction column is added per --model you pass in)
 
 Usage:
-    python embodiment_model/scripts/data_summary.py \
-        --data-dir data/raw/embodiment \
-        --model ridge=artifacts/embodiment_model/ridge/model.pkl \
-        --model random_forest=artifacts/embodiment_model/rf/model.pkl \
-        --model xgboost=artifacts/embodiment_model/xgb/model.pkl \
-        --output data/processed/embodiment/embodiment_summary.csv
+    python -m embodiment_model.scripts.data_overview 
+        --data-dir data/raw/embodiment   
+        --model ridge=artifacts/embodiment_model/ridge/embodiment_model.pkl  
+        --model lasso=artifacts/embodiment_model/lasso/embodiment_model.pkl  
+        --model random_forest=artifacts/embodiment_model/random_forest/embodiment_model.pkl  
+        --model xgboost=artifacts/embodiment_model/xgboost/embodiment_model.pkl  
+        --output analysis/data_summary/embodiment_summary.xlsx
 
 You can pass zero, one, or several --model flags. With zero, you get just
 the survey-score table.

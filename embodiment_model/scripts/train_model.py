@@ -69,16 +69,10 @@ def main(args):
     X, y, metadata = build_training_dataset(sessions)
 
     participant_ids = metadata["participant_id"].to_numpy()
-    feature_names   = list(X.columns)
+    feature_names = list(X.columns)
 
     print(f"✓ {X.shape[0]} sessions × {X.shape[1]} features")
     print(f"  Score range: [{y.min():.1f}, {y.max():.1f}]")
-
-    if X.shape[0] < 2:
-        print("\n⚠  Only 1 session — cannot run cross-validation.")
-        print("   Collect more sessions before training, or use --no-cv flag.")
-        print("   Pipeline is working correctly — nothing else to fix.")
-        return
 
     # ── Train ──────────────────────────────────────────────────────────────
     output_dir = Path(args.output)
